@@ -1,0 +1,495 @@
+# WebflowUI
+
+A lightweight JavaScript API for programmatically controlling Webflow native UI components. No dependencies, works seamlessly with Webflow's built-in elements.
+
+## Installation
+
+Add the following script to your Webflow project's **Custom Code** section (Site Settings → Custom Code → Footer Code):
+
+```html
+<script src="https://cdn.jsdelivr.net/gh/SimonKefas/webflow-ui@latest/script.js"></script>
+```
+
+### Version Pinning (Recommended for Production)
+
+For production sites, pin to a specific version to avoid unexpected changes:
+
+```html
+<script src="https://cdn.jsdelivr.net/gh/SimonKefas/webflow-ui@1.0.0/script.js"></script>
+```
+
+---
+
+## Quick Start
+
+1. Add the script to your Webflow project
+2. Add `data-wf-api-name="myComponent"` to any supported Webflow element
+3. Control it via JavaScript:
+
+```javascript
+// Open a dropdown
+WebflowUI.dropdown.open("myDropdown");
+
+// Get form values
+const values = WebflowUI.form.getValues("contactForm");
+
+// Listen for changes
+WebflowUI.radio.onChange("planSelector", (value) => {
+  console.log("Selected plan:", value);
+});
+```
+
+---
+
+## Supported Components
+
+| Component | Webflow Class | API Namespace |
+|-----------|---------------|---------------|
+| Dropdown | `.w-dropdown` | `WebflowUI.dropdown` |
+| Navbar | `.w-nav` | `WebflowUI.navbar` |
+| Radio Group | `.w-radio` | `WebflowUI.radio` |
+| Checkbox Group | `.w-checkbox` | `WebflowUI.checkbox` |
+| Form | `.w-form` | `WebflowUI.form` |
+
+---
+
+## Configuration
+
+### Required Attribute
+
+Add `data-wf-api-name` to any element you want to control:
+
+```html
+<div class="w-dropdown" data-wf-api-name="mainMenu">
+  <!-- Webflow dropdown content -->
+</div>
+```
+
+### Optional Type Override
+
+Use `data-wf-api` to explicitly set the component type (useful for custom implementations):
+
+```html
+<div data-wf-api-name="customDropdown" data-wf-api="dropdown">
+  <!-- Custom dropdown structure -->
+</div>
+```
+
+---
+
+## API Reference
+
+### Common Patterns
+
+All components share similar patterns:
+
+```javascript
+// Get all instances
+WebflowUI.{component}.all();
+
+// Get specific instance by name (string) or element (Element)
+WebflowUI.{component}.get("name");
+WebflowUI.{component}.get(domElement);
+
+// Force re-scan for dynamically added elements
+WebflowUI.{component}.refresh();
+```
+
+---
+
+## Dropdown API
+
+Control Webflow native dropdowns (`.w-dropdown`).
+
+### Methods
+
+```javascript
+// Open dropdown
+WebflowUI.dropdown.open("menuName");
+WebflowUI.dropdown.open("menuName", { useNative: false }); // Force class-based
+
+// Close dropdown
+WebflowUI.dropdown.close("menuName");
+
+// Toggle dropdown
+WebflowUI.dropdown.toggle("menuName");
+
+// Check state
+const isOpen = WebflowUI.dropdown.isOpen("menuName");
+
+// Listen for changes
+const unsubscribe = WebflowUI.dropdown.onChange("menuName", (isOpen, instance) => {
+  console.log("Dropdown is now:", isOpen ? "open" : "closed");
+});
+
+// Stop listening
+unsubscribe();
+
+// Get all dropdown instances
+const allDropdowns = WebflowUI.dropdown.all();
+
+// Get specific instance
+const instance = WebflowUI.dropdown.get("menuName");
+```
+
+### Instance Properties
+
+```javascript
+const dropdown = WebflowUI.dropdown.get("menuName");
+
+dropdown.root      // The root .w-dropdown element
+dropdown.name      // The data-wf-api-name value
+dropdown.toggleEl  // The .w-dropdown-toggle element
+dropdown.listEl    // The .w-dropdown-list element
+```
+
+### CSS Classes
+
+The library automatically adds/removes:
+- `wf-api-open` — Added to root when dropdown is open
+
+---
+
+## Navbar API
+
+Control Webflow native navbars (`.w-nav`) — particularly the mobile menu.
+
+### Methods
+
+```javascript
+// Open mobile menu
+WebflowUI.navbar.open("mainNav");
+
+// Close mobile menu
+WebflowUI.navbar.close("mainNav");
+
+// Toggle mobile menu
+WebflowUI.navbar.toggle("mainNav");
+
+// Check state
+const isOpen = WebflowUI.navbar.isOpen("mainNav");
+
+// Listen for changes
+const unsubscribe = WebflowUI.navbar.onChange("mainNav", (isOpen, instance) => {
+  console.log("Menu is now:", isOpen ? "open" : "closed");
+});
+```
+
+### Instance Properties
+
+```javascript
+const navbar = WebflowUI.navbar.get("mainNav");
+
+navbar.root     // The root .w-nav element
+navbar.name     // The data-wf-api-name value
+navbar.buttonEl // The .w-nav-button (hamburger) element
+navbar.menuEl   // The .w-nav-menu element
+```
+
+### CSS Classes
+
+- `wf-api-open` — Added to root when menu is open
+
+---
+
+## Radio Group API
+
+Control groups of Webflow radio buttons.
+
+### Setup
+
+Wrap your radio buttons in a container with `data-wf-api-name`:
+
+```html
+<div data-wf-api-name="planSelector">
+  <label class="w-radio">
+    <input type="radio" name="plan" value="basic">
+    <span class="w-form-label">Basic</span>
+  </label>
+  <label class="w-radio">
+    <input type="radio" name="plan" value="pro">
+    <span class="w-form-label">Pro</span>
+  </label>
+</div>
+```
+
+### Methods
+
+```javascript
+// Get selected value
+const value = WebflowUI.radio.getValue("planSelector");
+// Returns: "basic", "pro", or null
+
+// Set value
+WebflowUI.radio.setValue("planSelector", "pro");
+WebflowUI.radio.setValue("planSelector", "pro", { useNative: false }); // Skip click simulation
+
+// Clear selection
+WebflowUI.radio.clear("planSelector");
+
+// Listen for changes
+const unsubscribe = WebflowUI.radio.onChange("planSelector", (value, instance) => {
+  console.log("Selected:", value);
+});
+```
+
+### CSS Classes
+
+- `wf-api-has-value` — Added to root when a radio is selected
+
+---
+
+## Checkbox Group API
+
+Control groups of Webflow checkboxes.
+
+### Setup
+
+Wrap your checkboxes in a container with `data-wf-api-name`:
+
+```html
+<div data-wf-api-name="features">
+  <label class="w-checkbox">
+    <input type="checkbox" name="features" value="dark-mode">
+    <span class="w-form-label">Dark Mode</span>
+  </label>
+  <label class="w-checkbox">
+    <input type="checkbox" name="features" value="notifications">
+    <span class="w-form-label">Notifications</span>
+  </label>
+</div>
+```
+
+### Methods
+
+```javascript
+// Get all checked values
+const values = WebflowUI.checkbox.getValues("features");
+// Returns: ["dark-mode", "notifications"] or []
+
+// Set values (checks matching, unchecks others)
+WebflowUI.checkbox.setValues("features", ["dark-mode"]);
+WebflowUI.checkbox.setValues("features", ["dark-mode", "notifications"]);
+
+// Clear all
+WebflowUI.checkbox.clear("features");
+
+// Listen for changes
+const unsubscribe = WebflowUI.checkbox.onChange("features", (values, instance) => {
+  console.log("Checked:", values);
+});
+```
+
+### CSS Classes
+
+- `wf-api-has-value` — Added to root when at least one checkbox is checked
+
+---
+
+## Form API
+
+Control Webflow native forms (`.w-form`) with validation, value management, and event hooks.
+
+### Setup
+
+```html
+<div class="w-form" data-wf-api-name="contactForm">
+  <form>
+    <input type="text" name="email" placeholder="Email">
+    <input type="text" name="name" placeholder="Name">
+    <button type="submit">Submit</button>
+  </form>
+  <div class="w-form-done">Thanks!</div>
+  <div class="w-form-fail">
+    <span data-wf-error-slot>Something went wrong.</span>
+  </div>
+</div>
+```
+
+### Methods
+
+```javascript
+// Get all form values
+const values = WebflowUI.form.getValues("contactForm");
+// Returns: { email: "user@example.com", name: "John" }
+
+// Set form values
+WebflowUI.form.setValues("contactForm", {
+  email: "new@example.com",
+  name: "Jane"
+});
+
+// Get specific field element
+const emailField = WebflowUI.form.getField("contactForm", "email");
+
+// Get all fields with a name (for radio/checkbox groups)
+const planFields = WebflowUI.form.getFields("contactForm", "plan");
+
+// Programmatic submit
+WebflowUI.form.submit("contactForm");
+WebflowUI.form.submit("contactForm", { bypassValidation: true }); // Skip validators
+```
+
+### Event Hooks
+
+```javascript
+// Before submit (after validation passes)
+const unsubscribe = WebflowUI.form.onSubmit("contactForm", (ctx) => {
+  console.log("Submitting:", ctx.values);
+});
+
+// After successful submission
+WebflowUI.form.onSuccess("contactForm", (ctx) => {
+  console.log("Success!", ctx.values);
+  // Redirect, show message, etc.
+});
+
+// After failed submission
+WebflowUI.form.onError("contactForm", (ctx) => {
+  console.error("Form submission failed");
+});
+```
+
+### Custom Validation
+
+```javascript
+// Add validator to specific form
+const removeValidator = WebflowUI.form.addValidator("contactForm", (ctx) => {
+  if (!ctx.values.email.includes("@")) {
+    return "Please enter a valid email"; // String = error message
+  }
+  
+  if (ctx.values.name.length < 2) {
+    return {
+      message: "Name must be at least 2 characters",
+      field: ctx.instance.getField("name") // Highlights field
+    };
+  }
+  
+  return true; // Valid
+});
+
+// Remove validator later
+removeValidator();
+
+// Global validator (applies to ALL forms)
+const removeGlobal = WebflowUI.form.registerValidator((ctx) => {
+  // Block certain email domains
+  if (ctx.values.email && ctx.values.email.endsWith("@spam.com")) {
+    return "This email domain is not allowed";
+  }
+  return true;
+});
+```
+
+### Custom Error Messages
+
+Use `data-wf-error-slot` to define where error messages appear:
+
+```html
+<div class="w-form-fail">
+  <span data-wf-error-slot>Default error message</span>
+</div>
+```
+
+When a validator returns a message, it replaces the slot content.
+
+### CSS Classes
+
+- `wf-api-invalid` — Added to fields that fail validation
+
+---
+
+## Advanced Usage
+
+### Dynamic Elements
+
+WebflowUI automatically detects new elements added to the DOM. If you need to manually trigger a scan:
+
+```javascript
+WebflowUI.dropdown.refresh();
+WebflowUI.form.refresh();
+// etc.
+```
+
+### Working with Instances Directly
+
+```javascript
+const dropdown = WebflowUI.dropdown.get("menuName");
+
+// Access instance methods directly
+dropdown.open();
+dropdown.close();
+dropdown.toggle();
+dropdown.isOpen();
+dropdown.onChange((isOpen) => { /* ... */ });
+```
+
+### Using Element References
+
+You can pass DOM elements instead of names:
+
+```javascript
+const element = document.querySelector(".my-dropdown");
+WebflowUI.dropdown.open(element);
+
+const isOpen = WebflowUI.dropdown.isOpen(element);
+```
+
+### Native vs Forced Behavior
+
+By default, the API uses Webflow's native behaviors (click simulation, jQuery events). You can bypass this:
+
+```javascript
+// Force class-based toggle (no click simulation)
+WebflowUI.dropdown.open("menu", { useNative: false });
+WebflowUI.navbar.close("nav", { useNative: false });
+```
+
+---
+
+## Browser Support
+
+- All modern browsers (Chrome, Firefox, Safari, Edge)
+- No IE11 support (uses ES6 features like `Map`, `Set`, arrow functions)
+
+---
+
+## Troubleshooting
+
+### Component not found
+
+Make sure:
+1. The element has `data-wf-api-name` attribute
+2. The element has the correct Webflow class (e.g., `.w-dropdown`)
+3. The script is loaded before your custom code runs
+
+### Changes not detected
+
+If you're adding elements dynamically after page load, call `.refresh()`:
+
+```javascript
+WebflowUI.dropdown.refresh();
+```
+
+### Conflicts with Webflow
+
+If native Webflow behavior conflicts with the API:
+
+```javascript
+// Use forced mode
+WebflowUI.dropdown.open("menu", { useNative: false });
+```
+
+---
+
+## License
+
+MIT License - Free for personal and commercial use.
+
+---
+
+## Contributing
+
+Issues and pull requests welcome at [GitHub](https://github.com/SimonKefas/webflow-ui).
+

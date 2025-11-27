@@ -1,0 +1,1404 @@
+/**
+ * WebflowUI Core
+ * - Handles DOM ready, mutation observing, and component registration.
+ * - All components use data-wf-api-name for opt-in.
+ */
+(function () {
+  window.WebflowUI = window.WebflowUI || {};
+  if (window.WebflowUI._core) return; // prevent double-init
+
+  const NAME_ATTR = "data-wf-api-name";
+  const TYPE_ATTR = "data-wf-api";
+
+  const components = [];
+
+  function registerComponent(def) {
+    // def: { type, isMatch(el), createInstance(el) }
+    components.push(def);
+    scan();
+  }
+
+  function scan() {
+    const named = document.querySelectorAll("[" + NAME_ATTR + "]");
+    named.forEach(function (el) {
+      components.forEach(function (comp) {
+        try {
+          if (comp.isMatch(el)) {
+            comp.createInstance(el);
+          }
+        } catch (err) {
+          console.error("[WebflowUI._core] Component scan error:", err);
+        }
+      });
+    });
+  }
+
+  function ready(fn) {
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", fn);
+    } else {
+      fn();
+    }
+  }
+
+  const docObserver = new MutationObserver(function (mutations) {
+    let shouldScan = false;
+    for (var i = 0; i < mutations.length; i++) {
+      var m = mutations[i];
+      if (m.addedNodes && m.addedNodes.length) {
+        shouldScan = true;
+        break;
+      }
+    }
+    if (shouldScan) scan();
+  });
+
+  ready(function () {
+    scan();
+    docObserver.observe(document.documentElement, {
+      childList: true,
+      subtree: true
+    });
+  });
+
+  window.WebflowUI._core = {
+    NAME_ATTR: NAME_ATTR,
+    TYPE_ATTR: TYPE_ATTR,
+    registerComponent: registerComponent,
+    scan: scan
+  };
+})();
+
+/**
+ * WebflowUI.dropdown
+ * - Works on Webflow native dropdowns (w-dropdown)
+ * - Root element must have data-wf-api-name
+ */
+(function () {
+  if (window.WebflowUI.dropdown) return;
+
+  var core = window.WebflowUI._core;
+  var NAME_ATTR = core.NAME_ATTR;
+  var TYPE_ATTR = core.TYPE_ATTR;
+  var TYPE_DROPDOWN = "dropdown";
+  var WF_DROPDOWN_CLASS = "w-dropdown";
+  var WF_TOGGLE_SELECTOR = ".w-dropdown-toggle";
+  var WF_LIST_SELECTOR = ".w-dropdown-list";
+  var OPEN_CLASS = "w--open";
+
+  var registry = new Map();
+
+  function DropdownInstance(root) {
+    this.root = root;
+    this.name = root.getAttribute(NAME_ATTR) || null;
+    this.toggleEl = root.querySelector(WF_TOGGLE_SELECTOR);
+    this.listEl = root.querySelector(WF_LIST_SELECTOR);
+    this._listeners = new Set();
+    this._mutationObserver = null;
+
+    if (!this.toggleEl || !this.listEl) {
+      console.warn(
+        "[WebflowUI.dropdown] Missing .w-dropdown-toggle or .w-dropdown-list for",
+        root
+      );
+      return;
+    }
+
+    this._watchStateChanges();
+  }
+
+  DropdownInstance.prototype.isOpen = function () {
+    return (
+      this.toggleEl.classList.contains(OPEN_CLASS) ||
+      this.listEl.classList.contains(OPEN_CLASS)
+    );
+  };
+
+  DropdownInstance.prototype.open = function (options) {
+    options = options || {};
+    if (this.isOpen()) return;
+    var useNative = options.useNative !== false;
+
+    if (useNative && this._nativeOpen()) return;
+
+    this._forceOpen();
+  };
+
+  DropdownInstance.prototype.close = function (options) {
+    options = options || {};
+    if (!this.isOpen()) return;
+    var useNative = options.useNative !== false;
+
+    if (useNative && this._nativeClose()) return;
+    if (useNative && this._nativeToggleClose()) return;
+
+    this._forceClose();
+  };
+
+  DropdownInstance.prototype.toggle = function (options) {
+    if (this.isOpen()) {
+      this.close(options);
+    } else {
+      this.open(options);
+    }
+  };
+
+  DropdownInstance.prototype.onChange = function (callback) {
+    if (typeof callback !== "function") return function () {};
+    this._listeners.add(callback);
+    var self = this;
+    return function () {
+      self._listeners["delete"](callback);
+    };
+  };
+
+  DropdownInstance.prototype._watchStateChanges = function () {
+    var self = this;
+
+    function emit() {
+      self._emitChange();
+    }
+
+    var observer = new MutationObserver(function (mutations) {
+      var changed = false;
+      for (var i = 0; i < mutations.length; i++) {
+        var m = mutations[i];
+        if (
+          m.type === "attributes" &&
+          m.attributeName === "class" &&
+          (m.target === self.toggleEl || m.target === self.listEl)
+        ) {
+          changed = true;
+          break;
+        }
+      }
+      if (changed) emit();
+    });
+
+    observer.observe(this.toggleEl, {
+      attributes: true,
+      attributeFilter: ["class"]
+    });
+    observer.observe(this.listEl, {
+      attributes: true,
+      attributeFilter: ["class"]
+    });
+
+    this._mutationObserver = observer;
+  };
+
+  DropdownInstance.prototype._emitChange = function () {
+    var open = this.isOpen();
+    this.root.classList.toggle("wf-api-open", open);
+    this._listeners.forEach(function (cb) {
+      try {
+        cb(open, this);
+      } catch (err) {
+        console.error("[WebflowUI.dropdown] onChange callback error", err);
+      }
+    }, this);
+  };
+
+  DropdownInstance.prototype._nativeOpen = function () {
+    if (this.isOpen()) return true;
+    this._simulateClick(this.toggleEl);
+    return this.isOpen();
+  };
+
+  DropdownInstance.prototype._nativeClose = function () {
+    var $ = window.jQuery;
+    if (!$ || !this.root.classList.contains(WF_DROPDOWN_CLASS)) return false;
+
+    try {
+      $(this.root).triggerHandler("w-close.w-dropdown");
+      return !this.isOpen();
+    } catch (err) {
+      console.warn("[WebflowUI.dropdown] Error calling w-close.w-dropdown", err);
+      return false;
+    }
+  };
+
+  DropdownInstance.prototype._nativeToggleClose = function () {
+    if (!this.isOpen()) return true;
+    this._simulateClick(this.toggleEl);
+    return !this.isOpen();
+  };
+
+  DropdownInstance.prototype._simulateClick = function (el) {
+    if (!el) return;
+    el.click();
+  };
+
+  DropdownInstance.prototype._forceOpen = function () {
+    this.toggleEl.classList.add(OPEN_CLASS);
+    this.listEl.classList.add(OPEN_CLASS);
+    this.root.classList.add("wf-api-open");
+    this.toggleEl.setAttribute("aria-expanded", "true");
+    this._emitChange();
+  };
+
+  DropdownInstance.prototype._forceClose = function () {
+    this.toggleEl.classList.remove(OPEN_CLASS);
+    this.listEl.classList.remove(OPEN_CLASS);
+    this.root.classList.remove("wf-api-open");
+    this.toggleEl.setAttribute("aria-expanded", "false");
+    this._emitChange();
+  };
+
+  function isDropdownRoot(el) {
+    var explicitType = el.getAttribute(TYPE_ATTR);
+    if (explicitType === TYPE_DROPDOWN) return true;
+    if (!explicitType && el.classList.contains(WF_DROPDOWN_CLASS)) return true;
+    return false;
+  }
+
+  function createInstance(root) {
+    if (!isDropdownRoot(root)) return;
+    if (registry.has(root)) return;
+    var instance = new DropdownInstance(root);
+    if (instance.toggleEl && instance.listEl) {
+      registry.set(root, instance);
+    }
+  }
+
+  core.registerComponent({
+    type: TYPE_DROPDOWN,
+    isMatch: isDropdownRoot,
+    createInstance: createInstance
+  });
+
+  function getInstance(target) {
+    if (!target) return null;
+
+    if (target instanceof DropdownInstance) return target;
+
+    if (target instanceof Element) {
+      return registry.get(target) || null;
+    }
+
+    if (typeof target === "string") {
+      var values = registry.values();
+      var next = values.next();
+      while (!next.done) {
+        var inst = next.value;
+        if (inst.name === target) return inst;
+        next = values.next();
+      }
+      return null;
+    }
+
+    return null;
+  }
+
+  window.WebflowUI.dropdown = {
+    all: function () {
+      return Array.from(registry.values());
+    },
+    get: function (target) {
+      return getInstance(target);
+    },
+    open: function (target, options) {
+      var inst = getInstance(target);
+      if (inst) inst.open(options);
+    },
+    close: function (target, options) {
+      var inst = getInstance(target);
+      if (inst) inst.close(options);
+    },
+    toggle: function (target, options) {
+      var inst = getInstance(target);
+      if (inst) inst.toggle(options);
+    },
+    isOpen: function (target) {
+      var inst = getInstance(target);
+      return inst ? inst.isOpen() : false;
+    },
+    onChange: function (target, callback) {
+      var inst = getInstance(target);
+      if (!inst) {
+        console.warn("[WebflowUI.dropdown] No instance found for", target);
+        return function () {};
+      }
+      return inst.onChange(callback);
+    },
+    refresh: function () {
+      core.scan();
+    }
+  };
+})();
+
+/**
+ * WebflowUI.navbar
+ * - Works on Webflow native navbars (w-nav)
+ * - Root element must have data-wf-api-name
+ */
+(function () {
+  if (window.WebflowUI.navbar) return;
+
+  var core = window.WebflowUI._core;
+  var NAME_ATTR = core.NAME_ATTR;
+  var TYPE_ATTR = core.TYPE_ATTR;
+  var TYPE_NAVBAR = "navbar";
+  var WF_NAV_CLASS = "w-nav";
+  var WF_BUTTON_SELECTOR = ".w-nav-button";
+  var WF_MENU_SELECTOR = ".w-nav-menu";
+  var OPEN_CLASS = "w--open";
+  var BODY_OPEN_CLASS = "w-nav-open";
+
+  var registry = new Map();
+
+  function NavbarInstance(root) {
+    this.root = root;
+    this.name = root.getAttribute(NAME_ATTR) || null;
+    this.buttonEl = root.querySelector(WF_BUTTON_SELECTOR);
+    this.menuEl = root.querySelector(WF_MENU_SELECTOR);
+    this._listeners = new Set();
+    this._mutationObserver = null;
+
+    if (!this.buttonEl || !this.menuEl) {
+      console.warn(
+        "[WebflowUI.navbar] Missing .w-nav-button or .w-nav-menu for",
+        root
+      );
+      return;
+    }
+
+    this._watchStateChanges();
+  }
+
+  NavbarInstance.prototype.isOpen = function () {
+    return (
+      this.buttonEl.classList.contains(OPEN_CLASS) ||
+      this.menuEl.classList.contains(OPEN_CLASS) ||
+      document.body.classList.contains(BODY_OPEN_CLASS)
+    );
+  };
+
+  NavbarInstance.prototype.open = function (options) {
+    options = options || {};
+    if (this.isOpen()) return;
+    var useNative = options.useNative !== false;
+
+    if (useNative && this._nativeToggle(true)) return;
+
+    this._forceOpen();
+  };
+
+  NavbarInstance.prototype.close = function (options) {
+    options = options || {};
+    if (!this.isOpen()) return;
+    var useNative = options.useNative !== false;
+
+    if (useNative && this._nativeToggle(false)) return;
+
+    this._forceClose();
+  };
+
+  NavbarInstance.prototype.toggle = function (options) {
+    if (this.isOpen()) {
+      this.close(options);
+    } else {
+      this.open(options);
+    }
+  };
+
+  NavbarInstance.prototype.onChange = function (callback) {
+    if (typeof callback !== "function") return function () {};
+    this._listeners.add(callback);
+    var self = this;
+    return function () {
+      self._listeners["delete"](callback);
+    };
+  };
+
+  NavbarInstance.prototype._watchStateChanges = function () {
+    var self = this;
+
+    function emit() {
+      self._emitChange();
+    }
+
+    var observer = new MutationObserver(function (mutations) {
+      var changed = false;
+      for (var i = 0; i < mutations.length; i++) {
+        var m = mutations[i];
+        if (
+          m.type === "attributes" &&
+          m.attributeName === "class" &&
+          (m.target === self.buttonEl || m.target === self.menuEl)
+        ) {
+          changed = true;
+          break;
+        }
+      }
+      if (changed) emit();
+    });
+
+    observer.observe(this.buttonEl, {
+      attributes: true,
+      attributeFilter: ["class"]
+    });
+    observer.observe(this.menuEl, {
+      attributes: true,
+      attributeFilter: ["class"]
+    });
+
+    this._mutationObserver = observer;
+  };
+
+  NavbarInstance.prototype._emitChange = function () {
+    var open = this.isOpen();
+    this.root.classList.toggle("wf-api-open", open);
+    this._listeners.forEach(function (cb) {
+      try {
+        cb(open, this);
+      } catch (err) {
+        console.error("[WebflowUI.navbar] onChange callback error", err);
+      }
+    }, this);
+  };
+
+  NavbarInstance.prototype._nativeToggle = function (shouldOpen) {
+    var initiallyOpen = this.isOpen();
+    if (shouldOpen === initiallyOpen) return true;
+
+    if (!this.buttonEl) return false;
+    this.buttonEl.click();
+    return this.isOpen() === shouldOpen;
+  };
+
+  NavbarInstance.prototype._forceOpen = function () {
+    this.buttonEl.classList.add(OPEN_CLASS);
+    this.menuEl.classList.add(OPEN_CLASS);
+    document.body.classList.add(BODY_OPEN_CLASS);
+    this._emitChange();
+  };
+
+  NavbarInstance.prototype._forceClose = function () {
+    this.buttonEl.classList.remove(OPEN_CLASS);
+    this.menuEl.classList.remove(OPEN_CLASS);
+    document.body.classList.remove(BODY_OPEN_CLASS);
+    this._emitChange();
+  };
+
+  function isNavbarRoot(el) {
+    var explicitType = el.getAttribute(TYPE_ATTR);
+    if (explicitType === TYPE_NAVBAR) return true;
+    if (!explicitType && el.classList.contains(WF_NAV_CLASS)) return true;
+    return false;
+  }
+
+  function createInstance(root) {
+    if (!isNavbarRoot(root)) return;
+    if (registry.has(root)) return;
+    var instance = new NavbarInstance(root);
+    if (instance.buttonEl && instance.menuEl) {
+      registry.set(root, instance);
+    }
+  }
+
+  core.registerComponent({
+    type: TYPE_NAVBAR,
+    isMatch: isNavbarRoot,
+    createInstance: createInstance
+  });
+
+  function getInstance(target) {
+    if (!target) return null;
+
+    if (target instanceof NavbarInstance) return target;
+
+    if (target instanceof Element) {
+      return registry.get(target) || null;
+    }
+
+    if (typeof target === "string") {
+      var values = registry.values();
+      var next = values.next();
+      while (!next.done) {
+        var inst = next.value;
+        if (inst.name === target) return inst;
+        next = values.next();
+      }
+      return null;
+    }
+
+    return null;
+  }
+
+  window.WebflowUI.navbar = {
+    all: function () {
+      return Array.from(registry.values());
+    },
+    get: function (target) {
+      return getInstance(target);
+    },
+    open: function (target, options) {
+      var inst = getInstance(target);
+      if (inst) inst.open(options);
+    },
+    close: function (target, options) {
+      var inst = getInstance(target);
+      if (inst) inst.close(options);
+    },
+    toggle: function (target, options) {
+      var inst = getInstance(target);
+      if (inst) inst.toggle(options);
+    },
+    isOpen: function (target) {
+      var inst = getInstance(target);
+      return inst ? inst.isOpen() : false;
+    },
+    onChange: function (target, callback) {
+      var inst = getInstance(target);
+      if (!inst) {
+        console.warn("[WebflowUI.navbar] No instance found for", target);
+        return function () {};
+      }
+      return inst.onChange(callback);
+    },
+    refresh: function () {
+      core.scan();
+    }
+  };
+})();
+
+/**
+ * WebflowUI.radio
+ * - Group-level API for radios
+ * - Root element: any container with data-wf-api-name that wraps Webflow .w-radio inputs
+ */
+(function () {
+  if (window.WebflowUI.radio) return;
+
+  var core = window.WebflowUI._core;
+  var NAME_ATTR = core.NAME_ATTR;
+  var TYPE_ATTR = core.TYPE_ATTR;
+  var TYPE_RADIO = "radio-group";
+
+  var registry = new Map();
+
+  function RadioGroupInstance(root) {
+    this.root = root;
+    this.name = root.getAttribute(NAME_ATTR) || null;
+    this.inputs = Array.from(
+      root.querySelectorAll('input[type="radio"]')
+    );
+    this._listeners = new Set();
+
+    if (!this.inputs.length) {
+      console.warn("[WebflowUI.radio] No radio inputs found in", root);
+      return;
+    }
+
+    var self = this;
+    this._boundOnChange = function () {
+      self._emitChange();
+    };
+
+    this.inputs.forEach(function (input) {
+      input.addEventListener("change", self._boundOnChange);
+    });
+  }
+
+  RadioGroupInstance.prototype.getValue = function () {
+    var checked = this.inputs.find(function (i) {
+      return i.checked;
+    });
+    return checked ? checked.value : null;
+  };
+
+  RadioGroupInstance.prototype.setValue = function (value, options) {
+    options = options || {};
+    var useNative = options.useNative !== false;
+
+    var target = this.inputs.find(function (i) {
+      return i.value === value;
+    });
+    if (!target) return;
+
+    if (useNative) {
+      if (!target.checked) {
+        target.click();
+      }
+    } else {
+      this.inputs.forEach(function (i) {
+        i.checked = i === target;
+      });
+      this._emitChange();
+    }
+  };
+
+  RadioGroupInstance.prototype.clear = function (options) {
+    options = options || {};
+    var useNative = options.useNative !== false;
+
+    if (useNative) {
+      this.inputs.forEach(function (input) {
+        if (!input.checked) return;
+        input.checked = false;
+        var evt = new Event("change", { bubbles: true });
+        input.dispatchEvent(evt);
+      });
+    } else {
+      this.inputs.forEach(function (i) {
+        i.checked = false;
+      });
+      this._emitChange();
+    }
+  };
+
+  RadioGroupInstance.prototype.onChange = function (callback) {
+    if (typeof callback !== "function") return function () {};
+    this._listeners.add(callback);
+    var self = this;
+    return function () {
+      self._listeners["delete"](callback);
+    };
+  };
+
+  RadioGroupInstance.prototype._emitChange = function () {
+    var value = this.getValue();
+    this.root.classList.toggle("wf-api-has-value", value != null);
+    this._listeners.forEach(function (cb) {
+      try {
+        cb(value, this);
+      } catch (err) {
+        console.error("[WebflowUI.radio] onChange callback error", err);
+      }
+    }, this);
+  };
+
+  function isRadioRoot(el) {
+    var explicitType = el.getAttribute(TYPE_ATTR);
+    if (explicitType === "radio" || explicitType === TYPE_RADIO) return true;
+    if (!explicitType && el.querySelector('.w-radio input[type="radio"]')) {
+      return true;
+    }
+    return false;
+  }
+
+  function createInstance(root) {
+    if (!isRadioRoot(root)) return;
+    if (registry.has(root)) return;
+    var instance = new RadioGroupInstance(root);
+    if (instance.inputs && instance.inputs.length) {
+      registry.set(root, instance);
+    }
+  }
+
+  core.registerComponent({
+    type: TYPE_RADIO,
+    isMatch: isRadioRoot,
+    createInstance: createInstance
+  });
+
+  function getInstance(target) {
+    if (!target) return null;
+
+    if (target instanceof RadioGroupInstance) return target;
+
+    if (target instanceof Element) {
+      return registry.get(target) || null;
+    }
+
+    if (typeof target === "string") {
+      var values = registry.values();
+      var next = values.next();
+      while (!next.done) {
+        var inst = next.value;
+        if (inst.name === target) return inst;
+        next = values.next();
+      }
+      return null;
+    }
+
+    return null;
+  }
+
+  window.WebflowUI.radio = {
+    all: function () {
+      return Array.from(registry.values());
+    },
+    get: function (target) {
+      return getInstance(target);
+    },
+    getValue: function (target) {
+      var inst = getInstance(target);
+      return inst ? inst.getValue() : null;
+    },
+    setValue: function (target, value, options) {
+      var inst = getInstance(target);
+      if (inst) inst.setValue(value, options);
+    },
+    clear: function (target, options) {
+      var inst = getInstance(target);
+      if (inst) inst.clear(options);
+    },
+    onChange: function (target, callback) {
+      var inst = getInstance(target);
+      if (!inst) {
+        console.warn("[WebflowUI.radio] No instance found for", target);
+        return function () {};
+      }
+      return inst.onChange(callback);
+    },
+    refresh: function () {
+      core.scan();
+    }
+  };
+})();
+
+/**
+ * WebflowUI.checkbox
+ * - Group-level API for checkboxes
+ * - Root element: any container with data-wf-api-name that wraps Webflow .w-checkbox inputs
+ */
+(function () {
+  if (window.WebflowUI.checkbox) return;
+
+  var core = window.WebflowUI._core;
+  var NAME_ATTR = core.NAME_ATTR;
+  var TYPE_ATTR = core.TYPE_ATTR;
+  var TYPE_CHECKBOX = "checkbox-group";
+
+  var registry = new Map();
+
+  function CheckboxGroupInstance(root) {
+    this.root = root;
+    this.name = root.getAttribute(NAME_ATTR) || null;
+    this.inputs = Array.from(
+      root.querySelectorAll('input[type="checkbox"]')
+    );
+    this._listeners = new Set();
+
+    if (!this.inputs.length) {
+      console.warn("[WebflowUI.checkbox] No checkbox inputs found in", root);
+      return;
+    }
+
+    var self = this;
+    this._boundOnChange = function () {
+      self._emitChange();
+    };
+
+    this.inputs.forEach(function (input) {
+      input.addEventListener("change", self._boundOnChange);
+    });
+  }
+
+  CheckboxGroupInstance.prototype.getValues = function () {
+    return this.inputs
+      .filter(function (i) {
+        return i.checked;
+      })
+      .map(function (i) {
+        return i.value;
+      });
+  };
+
+  CheckboxGroupInstance.prototype.setValues = function (values, options) {
+    options = options || {};
+    var useNative = options.useNative !== false;
+    if (!Array.isArray(values)) values = [values];
+
+    var valueSet = new Set(values);
+
+    if (useNative) {
+      this.inputs.forEach(function (input) {
+        var shouldBeChecked = valueSet.has(input.value);
+        if (input.checked !== shouldBeChecked) {
+          input.click();
+        }
+      });
+    } else {
+      this.inputs.forEach(function (input) {
+        input.checked = valueSet.has(input.value);
+      });
+      this._emitChange();
+    }
+  };
+
+  CheckboxGroupInstance.prototype.clear = function (options) {
+    options = options || {};
+    var useNative = options.useNative !== false;
+
+    if (useNative) {
+      this.inputs.forEach(function (input) {
+        if (!input.checked) return;
+        input.checked = false;
+        var evt = new Event("change", { bubbles: true });
+        input.dispatchEvent(evt);
+      });
+    } else {
+      this.inputs.forEach(function (input) {
+        input.checked = false;
+      });
+      this._emitChange();
+    }
+  };
+
+  CheckboxGroupInstance.prototype.onChange = function (callback) {
+    if (typeof callback !== "function") return function () {};
+    this._listeners.add(callback);
+    var self = this;
+    return function () {
+      self._listeners["delete"](callback);
+    };
+  };
+
+  CheckboxGroupInstance.prototype._emitChange = function () {
+    var values = this.getValues();
+    this.root.classList.toggle("wf-api-has-value", values.length > 0);
+    this._listeners.forEach(function (cb) {
+      try {
+        cb(values, this);
+      } catch (err) {
+        console.error("[WebflowUI.checkbox] onChange callback error", err);
+      }
+    }, this);
+  };
+
+  function isCheckboxRoot(el) {
+    var explicitType = el.getAttribute(TYPE_ATTR);
+    if (explicitType === "checkbox" || explicitType === TYPE_CHECKBOX) return true;
+    if (!explicitType && el.querySelector('.w-checkbox input[type="checkbox"]')) {
+      return true;
+    }
+    return false;
+  }
+
+  function createInstance(root) {
+    if (!isCheckboxRoot(root)) return;
+    if (registry.has(root)) return;
+    var instance = new CheckboxGroupInstance(root);
+    if (instance.inputs && instance.inputs.length) {
+      registry.set(root, instance);
+    }
+  }
+
+  core.registerComponent({
+    type: TYPE_CHECKBOX,
+    isMatch: isCheckboxRoot,
+    createInstance: createInstance
+  });
+
+  function getInstance(target) {
+    if (!target) return null;
+
+    if (target instanceof CheckboxGroupInstance) return target;
+
+    if (target instanceof Element) {
+      return registry.get(target) || null;
+    }
+
+    if (typeof target === "string") {
+      var values = registry.values();
+      var next = values.next();
+      while (!next.done) {
+        var inst = next.value;
+        if (inst.name === target) return inst;
+        next = values.next();
+      }
+      return null;
+    }
+
+    return null;
+  }
+
+  window.WebflowUI.checkbox = {
+    all: function () {
+      return Array.from(registry.values());
+    },
+    get: function (target) {
+      return getInstance(target);
+    },
+    getValues: function (target) {
+      var inst = getInstance(target);
+      return inst ? inst.getValues() : [];
+    },
+    setValues: function (target, values, options) {
+      var inst = getInstance(target);
+      if (inst) inst.setValues(values, options);
+    },
+    clear: function (target, options) {
+      var inst = getInstance(target);
+      if (inst) inst.clear(options);
+    },
+    onChange: function (target, callback) {
+      var inst = getInstance(target);
+      if (!inst) {
+        console.warn("[WebflowUI.checkbox] No instance found for", target);
+        return function () {};
+      }
+      return inst.onChange(callback);
+    },
+    refresh: function () {
+      core.scan();
+    }
+  };
+})();
+
+/**
+ * WebflowUI.form
+ * - Works on Webflow native forms (w-form)
+ * - Root element: .w-form with data-wf-api-name
+ * - Hooks into w-form-success / w-form-fail events
+ * - Provides a flexible API: values, events, validators
+ * - No built-in domain blocking or autocorrect – those are plugins on top.
+ */
+(function () {
+  if (window.WebflowUI.form) return;
+
+  var core = window.WebflowUI._core;
+  var NAME_ATTR = core.NAME_ATTR;
+  var TYPE_ATTR = core.TYPE_ATTR;
+  var TYPE_FORM = "form";
+  var WF_FORM_CLASS = "w-form";
+  var SUCCESS_SELECTOR = ".w-form-done";
+  var ERROR_SELECTOR = ".w-form-fail";
+  var ERROR_SLOT_ATTR = "data-wf-error-slot";
+
+  var registry = new Map();
+  var globalValidators = new Set();
+
+  function FormInstance(root) {
+    this.root = root;
+    this.name = root.getAttribute(NAME_ATTR) || null;
+    this.formEl = root.querySelector("form");
+    this.successEl = root.querySelector(SUCCESS_SELECTOR);
+    this.errorEl = root.querySelector(ERROR_SELECTOR);
+    this.errorSlotEl = this.errorEl
+      ? this.errorEl.querySelector("[" + ERROR_SLOT_ATTR + "]")
+      : null;
+    this._defaultErrorHTML = this.errorSlotEl
+      ? this.errorSlotEl.innerHTML
+      : null;
+
+    this._submitListeners = new Set();
+    this._successListeners = new Set();
+    this._errorListeners = new Set();
+    this._validators = new Set();
+
+    this.inputs = this.formEl
+      ? Array.from(this.formEl.querySelectorAll("input, textarea, select"))
+      : [];
+    this._fieldsByName = {};
+
+    var self = this;
+    this.inputs.forEach(function (field) {
+      var name = field.name;
+      if (!name) return;
+      if (!self._fieldsByName[name]) {
+        self._fieldsByName[name] = [];
+      }
+      self._fieldsByName[name].push(field);
+    });
+
+    if (!this.formEl) {
+      console.warn("[WebflowUI.form] No <form> inside .w-form for", root);
+      return;
+    }
+
+    this._bindEvents();
+  }
+
+  FormInstance.prototype._bindEvents = function () {
+    var self = this;
+
+    this._handleSubmit = function (event) {
+      self._onSubmit(event);
+    };
+    this._handleSuccess = function (event) {
+      self._onSuccess(event);
+    };
+    this._handleFail = function (event) {
+      self._onFail(event);
+    };
+
+    this.formEl.addEventListener("submit", this._handleSubmit);
+    // Webflow dispatches these custom events on the form element
+    this.formEl.addEventListener("w-form-success", this._handleSuccess);
+    this.formEl.addEventListener("w-form-fail", this._handleFail);
+  };
+
+  // --- Values API ---
+
+  FormInstance.prototype.getValues = function () {
+    var values = {};
+    this.inputs.forEach(function (field) {
+      var name = field.name;
+      if (!name) return;
+
+      var tag = field.tagName.toLowerCase();
+      var type = (field.type || "").toLowerCase();
+
+      if (type === "radio") {
+        if (!field.checked) return;
+        values[name] = field.value;
+        return;
+      }
+
+      if (type === "checkbox") {
+        if (!field.checked) return;
+        if (!Array.isArray(values[name])) {
+          values[name] = [];
+        }
+        values[name].push(field.value);
+        return;
+      }
+
+      if (tag === "select" && field.multiple) {
+        var selected = [];
+        for (var i = 0; i < field.options.length; i++) {
+          var opt = field.options[i];
+          if (opt.selected) selected.push(opt.value);
+        }
+        values[name] = selected;
+        return;
+      }
+
+      values[name] = field.value;
+    });
+    return values;
+  };
+
+  FormInstance.prototype.setValues = function (obj) {
+    if (!obj || typeof obj !== "object") return;
+    for (var name in obj) {
+      if (!Object.prototype.hasOwnProperty.call(obj, name)) continue;
+      var value = obj[name];
+      var fields = this._fieldsByName[name];
+      if (!fields || !fields.length) continue;
+
+      var isArray = Array.isArray(value);
+      fields.forEach(function (field) {
+        var tag = field.tagName.toLowerCase();
+        var type = (field.type || "").toLowerCase();
+
+        if (type === "radio") {
+          field.checked = field.value == value;
+          return;
+        }
+
+        if (type === "checkbox") {
+          if (isArray) {
+            field.checked = value.indexOf(field.value) !== -1;
+          } else {
+            field.checked = !!value;
+          }
+          return;
+        }
+
+        if (tag === "select" && field.multiple && isArray) {
+          for (var i = 0; i < field.options.length; i++) {
+            var opt = field.options[i];
+            opt.selected = value.indexOf(opt.value) !== -1;
+          }
+          return;
+        }
+
+        field.value = value;
+      });
+    }
+  };
+
+  FormInstance.prototype.getField = function (name) {
+    var list = this._fieldsByName[name];
+    return list && list.length ? list[0] : null;
+  };
+
+  FormInstance.prototype.getFields = function (name) {
+    var list = this._fieldsByName[name];
+    return list ? list.slice() : [];
+  };
+
+  // --- Submission API ---
+
+  FormInstance.prototype.submit = function (options) {
+    options = options || {};
+    var bypassValidation = options.bypassValidation === true;
+
+    if (!bypassValidation) {
+      // Trigger normal submit so our handler + browser validation run
+      if (typeof this.formEl.requestSubmit === "function") {
+        this.formEl.requestSubmit();
+      } else {
+        var evt = new Event("submit", { bubbles: true, cancelable: true });
+        this.formEl.dispatchEvent(evt);
+      }
+    } else {
+      // Force native submit, skipping our validators
+      this.formEl.submit();
+    }
+  };
+
+  // --- Hooks / events ---
+
+  FormInstance.prototype.onSubmit = function (callback) {
+    if (typeof callback !== "function") return function () {};
+    this._submitListeners.add(callback);
+    var self = this;
+    return function () {
+      self._submitListeners.delete(callback);
+    };
+  };
+
+  FormInstance.prototype.onSuccess = function (callback) {
+    if (typeof callback !== "function") return function () {};
+    this._successListeners.add(callback);
+    var self = this;
+    return function () {
+      self._successListeners.delete(callback);
+    };
+  };
+
+  FormInstance.prototype.onError = function (callback) {
+    if (typeof callback !== "function") return function () {};
+    this._errorListeners.add(callback);
+    var self = this;
+    return function () {
+      self._errorListeners.delete(callback);
+    };
+  };
+
+  // --- Validators ---
+
+  // Per-form validator
+  FormInstance.prototype.addValidator = function (fn) {
+    if (typeof fn !== "function") return function () {};
+    this._validators.add(fn);
+    var self = this;
+    return function () {
+      self._validators.delete(fn);
+    };
+  };
+
+  // Internal: run validators and show error if needed
+  FormInstance.prototype._runValidators = function (ctx) {
+    var sets = [this._validators, globalValidators];
+
+    for (var s = 0; s < sets.length; s++) {
+      var set = sets[s];
+      var iter = set.values();
+      var next = iter.next();
+      while (!next.done) {
+        var fn = next.value;
+        var res;
+        try {
+          res = fn(ctx);
+        } catch (err) {
+          console.error("[WebflowUI.form] validator error", err);
+          res = true;
+        }
+
+        if (res === undefined || res === true) {
+          next = iter.next();
+          continue;
+        }
+
+        var message = null;
+        var field = null;
+        if (typeof res === "string") {
+          message = res;
+        } else if (res && typeof res === "object") {
+          message = res.message || null;
+          field = res.field || null;
+        }
+
+        this._showValidationError(message, field);
+        return false;
+      }
+    }
+    return true;
+  };
+
+  FormInstance.prototype._showValidationError = function (message, field) {
+    if (field && field.classList) {
+      field.classList.add("wf-api-invalid");
+    }
+
+    if (this.errorEl) {
+      if (this.errorSlotEl) {
+        this.errorSlotEl.innerHTML =
+          message != null ? String(message) : this._defaultErrorHTML || "";
+      }
+      this.errorEl.style.display = "block";
+    }
+  };
+
+  // --- Internal event handlers ---
+
+  FormInstance.prototype._onSubmit = function (event) {
+    var ctx = {
+      event: event,
+      form: this.formEl,
+      instance: this,
+      values: this.getValues()
+    };
+
+    var valid = this._runValidators(ctx);
+    if (!valid) {
+      event.preventDefault();
+      return;
+    }
+
+    this._submitListeners.forEach(function (cb) {
+      try {
+        cb(ctx);
+      } catch (err) {
+        console.error("[WebflowUI.form] onSubmit callback error", err);
+      }
+    });
+  };
+
+  FormInstance.prototype._onSuccess = function (event) {
+    var ctx = {
+      event: event,
+      form: this.formEl,
+      instance: this,
+      values: this.getValues()
+    };
+    this._successListeners.forEach(function (cb) {
+      try {
+        cb(ctx);
+      } catch (err) {
+        console.error("[WebflowUI.form] onSuccess callback error", err);
+      }
+    });
+  };
+
+  FormInstance.prototype._onFail = function (event) {
+    var ctx = {
+      event: event,
+      form: this.formEl,
+      instance: this,
+      values: this.getValues()
+    };
+    this._errorListeners.forEach(function (cb) {
+      try {
+        cb(ctx);
+      } catch (err) {
+        console.error("[WebflowUI.form] onError callback error", err);
+      }
+    });
+  };
+
+  // --- Root detection + registration ---
+
+  function isFormRoot(el) {
+    var explicitType = el.getAttribute(TYPE_ATTR);
+    if (explicitType === TYPE_FORM) return true;
+    if (!explicitType && el.classList.contains(WF_FORM_CLASS)) return true;
+    return false;
+  }
+
+  function createInstance(root) {
+    if (!isFormRoot(root)) return;
+    if (registry.has(root)) return;
+    var instance = new FormInstance(root);
+    if (instance.formEl) {
+      registry.set(root, instance);
+    }
+  }
+
+  core.registerComponent({
+    type: TYPE_FORM,
+    isMatch: isFormRoot,
+    createInstance: createInstance
+  });
+
+  function getInstance(target) {
+    if (!target) return null;
+
+    if (target instanceof FormInstance) return target;
+
+    if (target instanceof Element) {
+      return registry.get(target) || null;
+    }
+
+    if (typeof target === "string") {
+      var values = registry.values();
+      var next = values.next();
+      while (!next.done) {
+        var inst = next.value;
+        if (inst.name === target) return inst;
+        next = values.next();
+      }
+      return null;
+    }
+
+    return null;
+  }
+
+  window.WebflowUI.form = {
+    all: function () {
+      return Array.from(registry.values());
+    },
+    get: function (target) {
+      return getInstance(target);
+    },
+    getValues: function (target) {
+      var inst = getInstance(target);
+      return inst ? inst.getValues() : {};
+    },
+    setValues: function (target, values) {
+      var inst = getInstance(target);
+      if (inst) inst.setValues(values);
+    },
+    submit: function (target, options) {
+      var inst = getInstance(target);
+      if (inst) inst.submit(options);
+    },
+    onSubmit: function (target, callback) {
+      var inst = getInstance(target);
+      if (!inst) {
+        console.warn("[WebflowUI.form] No instance found for", target);
+        return function () {};
+      }
+      return inst.onSubmit(callback);
+    },
+    onSuccess: function (target, callback) {
+      var inst = getInstance(target);
+      if (!inst) {
+        console.warn("[WebflowUI.form] No instance found for", target);
+        return function () {};
+      }
+      return inst.onSuccess(callback);
+    },
+    onError: function (target, callback) {
+      var inst = getInstance(target);
+      if (!inst) {
+        console.warn("[WebflowUI.form] No instance found for", target);
+        return function () {};
+      }
+      return inst.onError(callback);
+    },
+    addValidator: function (target, fn) {
+      var inst = getInstance(target);
+      if (!inst) {
+        console.warn("[WebflowUI.form] No instance found for", target);
+        return function () {};
+      }
+      return inst.addValidator(fn);
+    },
+    registerValidator: function (fn) {
+      if (typeof fn !== "function") return function () {};
+      globalValidators.add(fn);
+      return function () {
+        globalValidators.delete(fn);
+      };
+    },
+    getField: function (target, name) {
+      var inst = getInstance(target);
+      return inst ? inst.getField(name) : null;
+    },
+    getFields: function (target, name) {
+      var inst = getInstance(target);
+      return inst ? inst.getFields(name) : [];
+    },
+    refresh: function () {
+      core.scan();
+    }
+  };
+})();
