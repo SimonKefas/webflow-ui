@@ -969,7 +969,9 @@
     this.successEl = root.querySelector(SUCCESS_SELECTOR);
     this.errorEl = root.querySelector(ERROR_SELECTOR);
     this.errorSlotEl = this.errorEl
-      ? this.errorEl.querySelector("[" + ERROR_SLOT_ATTR + "]")
+      ? this.errorEl.querySelector("[" + ERROR_SLOT_ATTR + "]") ||
+        this.errorEl.firstElementChild ||
+        this.errorEl
       : null;
     this._defaultErrorHTML = this.errorSlotEl
       ? this.errorSlotEl.innerHTML
@@ -1505,7 +1507,7 @@
     this.inputName = root.getAttribute("data-wf-gate-input") || null;
     this.validatorName = root.getAttribute("data-wf-gate-validator") || null;
     this.unlockOn =
-      (root.getAttribute("data-wf-gate-unlock-on") || "submit").toLowerCase();
+      (root.getAttribute("data-wf-gate-unlock-on") || "success").toLowerCase();
     this._listeners = new Set();
     this._formInstance = null;
     this._unsubscribeValidator = null;

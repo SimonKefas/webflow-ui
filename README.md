@@ -15,7 +15,7 @@ Add the following script to your Webflow project's **Custom Code** section (Site
 For production sites, pin to a specific version to avoid unexpected changes:
 
 ```html
-<script src="https://cdn.jsdelivr.net/gh/SimonKefas/webflow-ui@1.1.0/script.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/SimonKefas/webflow-ui@1.2.1/script.js"></script>
 ```
 
 ---
@@ -394,7 +394,21 @@ const removeGlobal = WebflowUI.form.registerValidator((ctx) => {
 
 ### Custom Error Messages
 
-Use `data-wf-error-slot` to define where error messages appear:
+Validator error messages are automatically displayed inside the `.w-form-fail` block. The system auto-detects the text element using this fallback chain:
+
+1. An element with `data-wf-error-slot` (explicit target)
+2. The first child element of `.w-form-fail`
+3. The `.w-form-fail` element itself
+
+This means standard Webflow forms work out of the box with no extra attributes:
+
+```html
+<div class="w-form-fail">
+  <div>Default error message</div>  <!-- automatically used as error slot -->
+</div>
+```
+
+For explicit control, use `data-wf-error-slot`:
 
 ```html
 <div class="w-form-fail">
@@ -402,7 +416,7 @@ Use `data-wf-error-slot` to define where error messages appear:
 </div>
 ```
 
-When a validator returns a message, it replaces the slot content.
+When a validator returns a message, it replaces the slot content. When the error clears, the original text is restored.
 
 ### CSS Classes
 
@@ -449,6 +463,7 @@ Content gating with localStorage persistence. Perfect for protecting content beh
 - `data-wf-gate-form` — Form wrapper (optional, auto-detects `.w-form`)
 - `data-wf-gate-input` — Input name to validate (optional)
 - `data-wf-gate-validator` — Validator name to use (optional)
+- `data-wf-gate-unlock-on` — When to unlock: `"success"` (default) waits for Webflow submission to succeed, `"submit"` unlocks immediately and blocks Webflow submission
 
 ### Methods
 
