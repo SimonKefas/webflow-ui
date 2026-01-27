@@ -943,7 +943,7 @@
  * WebflowUI.form
  * - Works on Webflow native forms (w-form)
  * - Root element: .w-form with data-wf-api-name
- * - Hooks into w-form-success / w-form-fail events
+ * - Detects Webflow form success / failure via DOM observation
  * - Provides a flexible API: values, events, validators
  * - No built-in domain blocking or autocorrect – those are plugins on top.
  */
@@ -1501,7 +1501,7 @@
  *   data-wf-gate-form         - Form wrapper element (optional, auto-detects .w-form)
  *   data-wf-gate-input        - Input name to validate (optional)
  *   data-wf-gate-validator    - Validator name to use (optional)
- *   data-wf-gate-unlock-on    - When to unlock: "submit" (default) or "success" (after Webflow success)
+ *   data-wf-gate-unlock-on    - When to unlock: "success" (default, after Webflow success) or "submit" (immediate, blocks Webflow submission)
  */
 (function () {
   if (window.WebflowUI.gate) return;
