@@ -1475,6 +1475,7 @@
  *   data-wf-gate-form         - Form wrapper element (optional, auto-detects .w-form)
  *   data-wf-gate-input        - Input name to validate (optional)
  *   data-wf-gate-validator    - Validator name to use (optional)
+ *   data-wf-gate-unlock-on    - When to unlock: "submit" (default) or "success" (after Webflow success)
  */
 (function () {
   if (window.WebflowUI.gate) return;
@@ -1503,9 +1504,12 @@
       (this.overlayEl ? this.overlayEl.querySelector(".w-form") : null);
     this.inputName = root.getAttribute("data-wf-gate-input") || null;
     this.validatorName = root.getAttribute("data-wf-gate-validator") || null;
+    this.unlockOn =
+      (root.getAttribute("data-wf-gate-unlock-on") || "submit").toLowerCase();
     this._listeners = new Set();
     this._formInstance = null;
     this._unsubscribeValidator = null;
+    this._unsubscribeSuccess = null;
 
     if (!this.overlayEl) {
       console.warn("[WebflowUI.gate] No [data-wf-gate-overlay] found for", root);
@@ -1547,6 +1551,7 @@
       if (formInst) {
         self._formInstance = formInst;
         self._attachValidator();
+        self._attachUnlockOnSuccess();
         return;
       }
 
@@ -1557,6 +1562,18 @@
     }
 
     tryHook();
+  };
+
+  GateInstance.prototype._attachUnlockOnSuccess = function () {
+    var self = this;
+    if (!this._formInstance) return;
+    if (this.unlockOn !== "success") return;
+    if (this._unsubscribeSuccess) return;
+
+    this._unsubscribeSuccess = this._formInstance.onSuccess(function () {
+      // Only grant access when Webflow actually reports success
+      self._grantAccess();
+    });
   };
 
   GateInstance.prototype._attachValidator = function () {
@@ -1595,8 +1612,14 @@
         };
       }
 
-      ctx.event.preventDefault();
-      self._grantAccess();
+      // Valid input:
+      // - If unlockOn="submit" (default): unlock immediately and block Webflow submission
+      // - If unlockOn="success": allow Webflow submission, unlock only on w-form-success
+      if (self.unlockOn === "submit") {
+        ctx.event.preventDefault();
+        self._grantAccess();
+      }
+
       return true;
     });
   };
