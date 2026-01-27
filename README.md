@@ -15,7 +15,7 @@ Add the following script to your Webflow project's **Custom Code** section (Site
 For production sites, pin to a specific version to avoid unexpected changes:
 
 ```html
-<script src="https://cdn.jsdelivr.net/gh/SimonKefas/webflow-ui@1.0.0/script.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/SimonKefas/webflow-ui@1.1.0/script.js"></script>
 ```
 
 ---
@@ -50,6 +50,7 @@ WebflowUI.radio.onChange("planSelector", (value) => {
 | Radio Group | `.w-radio` | `WebflowUI.radio` |
 | Checkbox Group | `.w-checkbox` | `WebflowUI.checkbox` |
 | Form | `.w-form` | `WebflowUI.form` |
+| Gate | Attribute-driven | `WebflowUI.gate` |
 
 ---
 
@@ -328,6 +329,15 @@ const planFields = WebflowUI.form.getFields("contactForm", "plan");
 // Programmatic submit
 WebflowUI.form.submit("contactForm");
 WebflowUI.form.submit("contactForm", { bypassValidation: true }); // Skip validators
+
+// Show custom error message
+WebflowUI.form.showError("contactForm", "Custom error message");
+
+// Hide error message
+WebflowUI.form.hideError("contactForm");
+
+// Reset form (clears values and hides error/success)
+WebflowUI.form.reset("contactForm");
 ```
 
 ### Event Hooks
@@ -397,6 +407,135 @@ When a validator returns a message, it replaces the slot content.
 ### CSS Classes
 
 - `wf-api-invalid` — Added to fields that fail validation
+
+---
+
+## Gate API
+
+Content gating with localStorage persistence. Perfect for protecting content behind forms, validating access codes, or creating paywalls.
+
+### Setup
+
+```html
+<div data-wf-api-name="contentGate" data-wf-gate>
+  <!-- Overlay with form (hidden when unlocked) -->
+  <div data-wf-gate-overlay>
+    <div class="w-form" data-wf-gate-form>
+      <form>
+        <input type="text" name="accessCode" placeholder="Enter code">
+        <button type="submit">Unlock</button>
+      </form>
+      <div class="w-form-done">Access granted!</div>
+      <div class="w-form-fail">
+        <span data-wf-error-slot>Invalid code</span>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Protected content (visible when unlocked) -->
+  <div class="protected-content">
+    <h1>Premium Content</h1>
+    <p>This is only visible after unlocking.</p>
+  </div>
+</div>
+```
+
+### Attributes
+
+- `data-wf-gate` — Marks element as gate root
+- `data-wf-api-name` — Gate identifier (also used for localStorage key)
+- `data-wf-gate-key` — Custom localStorage key (optional)
+- `data-wf-gate-overlay` — Element to hide when unlocked
+- `data-wf-gate-form` — Form wrapper (optional, auto-detects `.w-form`)
+- `data-wf-gate-input` — Input name to validate (optional)
+- `data-wf-gate-validator` — Validator name to use (optional)
+
+### Methods
+
+```javascript
+// Check if unlocked
+const unlocked = WebflowUI.gate.isUnlocked("contentGate");
+
+// Manually unlock
+WebflowUI.gate.unlock("contentGate");
+
+// Lock again (removes localStorage entry)
+WebflowUI.gate.lock("contentGate");
+
+// Listen for unlock/lock changes
+const unsubscribe = WebflowUI.gate.onChange("contentGate", (isUnlocked, instance) => {
+  console.log("Gate is now:", isUnlocked ? "unlocked" : "locked");
+});
+
+// Clear stored access for a specific key
+WebflowUI.gate.clearAccess("contentGate");
+```
+
+### Custom Validators
+
+Register validators to control access logic:
+
+```javascript
+// Register a validator
+WebflowUI.gate.registerValidator("accessCode", function (value, allValues, gateInstance) {
+  // Return true to grant access
+  if (value === "SECRET123") {
+    return true;
+  }
+  
+  // Return string for custom error message
+  return "Invalid access code";
+});
+```
+
+Then reference it in HTML:
+
+```html
+<div 
+  data-wf-api-name="contentGate" 
+  data-wf-gate
+  data-wf-gate-input="accessCode"
+  data-wf-gate-validator="accessCode"
+>
+  <!-- ... -->
+</div>
+```
+
+### No Validator (Simple Unlock)
+
+If you omit `data-wf-gate-validator`, the gate unlocks on any form submission:
+
+```html
+<div data-wf-api-name="emailGate" data-wf-gate>
+  <div data-wf-gate-overlay>
+    <!-- Any form submission unlocks -->
+    <div class="w-form">
+      <form>
+        <input type="email" name="email" placeholder="Enter email">
+        <button type="submit">Continue</button>
+      </form>
+    </div>
+  </div>
+  <div class="content">Protected content here</div>
+</div>
+```
+
+### CSS Classes
+
+- `wf-gate-locked` — Added to root when locked
+- `wf-gate-unlocked` — Added to root when unlocked
+
+### Instance Properties
+
+```javascript
+const gate = WebflowUI.gate.get("contentGate");
+
+gate.root           // The root element
+gate.name           // The data-wf-api-name value
+gate.overlayEl      // The overlay element
+gate.formWrapperEl  // The form wrapper
+gate.storageKey     // localStorage key used
+```
 
 ---
 
