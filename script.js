@@ -148,7 +148,7 @@
     this._listeners.add(callback);
     var self = this;
     return function () {
-      self._listeners["delete"](callback);
+      self._listeners.delete(callback);
     };
   };
 
@@ -407,7 +407,7 @@
     this._listeners.add(callback);
     var self = this;
     return function () {
-      self._listeners["delete"](callback);
+      self._listeners.delete(callback);
     };
   };
 
@@ -653,7 +653,7 @@
     this._listeners.add(callback);
     var self = this;
     return function () {
-      self._listeners["delete"](callback);
+      self._listeners.delete(callback);
     };
   };
 
@@ -843,7 +843,7 @@
     this._listeners.add(callback);
     var self = this;
     return function () {
-      self._listeners["delete"](callback);
+      self._listeners.delete(callback);
     };
   };
 
@@ -1282,6 +1282,8 @@
     // If a validator/plugin intentionally prevented default (e.g. gate unlock),
     // treat the submission as "handled" and stop Webflow's native handler too.
     if (event.defaultPrevented) {
+      // Ensure default is prevented (idempotent) and block any other handlers
+      event.preventDefault();
       event.stopPropagation();
       event.stopImmediatePropagation();
       return;
