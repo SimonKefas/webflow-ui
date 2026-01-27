@@ -1016,7 +1016,8 @@
       self._onFail(event);
     };
 
-    this.formEl.addEventListener("submit", this._handleSubmit);
+    // Use capture phase to intercept before Webflow's native handler
+    this.formEl.addEventListener("submit", this._handleSubmit, true);
     // Webflow dispatches these custom events on the form element
     this.formEl.addEventListener("w-form-success", this._handleSuccess);
     this.formEl.addEventListener("w-form-fail", this._handleFail);
@@ -1271,7 +1272,10 @@
 
     var valid = this._runValidators(ctx);
     if (!valid) {
+      // Full event blocking to prevent Webflow's native submission
       event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
       return;
     }
 
