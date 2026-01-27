@@ -1563,6 +1563,11 @@
     var self = this;
 
     this._unsubscribeValidator = this._formInstance.addValidator(function (ctx) {
+      // If already unlocked, skip gate validation and allow normal form submission
+      if (self.isUnlocked()) {
+        return true;
+      }
+
       // If no validator specified, just grant access on submit
       if (!self.validatorName) {
         ctx.event.preventDefault();
