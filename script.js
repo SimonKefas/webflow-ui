@@ -1279,6 +1279,14 @@
       return;
     }
 
+    // If a validator/plugin intentionally prevented default (e.g. gate unlock),
+    // treat the submission as "handled" and stop Webflow's native handler too.
+    if (event.defaultPrevented) {
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      return;
+    }
+
     this._submitListeners.forEach(function (cb) {
       try {
         cb(ctx);
