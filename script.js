@@ -1020,9 +1020,33 @@
 
     // Use capture phase to intercept before Webflow's native handler
     this.formEl.addEventListener("submit", this._handleSubmit, true);
-    // Webflow dispatches these custom events on the form element
-    this.formEl.addEventListener("w-form-success", this._handleSuccess);
-    this.formEl.addEventListener("w-form-fail", this._handleFail);
+
+    // Webflow does not dispatch custom events — it toggles display on the
+    // .w-form-done / .w-form-fail sibling divs.  Watch for style changes
+    // with a MutationObserver so we reliably detect success/failure.
+    if (this.successEl) {
+      this._successObserver = new MutationObserver(function () {
+        if (self.successEl.style.display === "block") {
+          self._onSuccess(new CustomEvent("w-form-success"));
+        }
+      });
+      this._successObserver.observe(this.successEl, {
+        attributes: true,
+        attributeFilter: ["style"]
+      });
+    }
+
+    if (this.errorEl) {
+      this._failObserver = new MutationObserver(function () {
+        if (self.errorEl.style.display === "block") {
+          self._onFail(new CustomEvent("w-form-fail"));
+        }
+      });
+      this._failObserver.observe(this.errorEl, {
+        attributes: true,
+        attributeFilter: ["style"]
+      });
+    }
   };
 
   // --- Values API ---
