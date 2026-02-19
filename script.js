@@ -2,15 +2,16 @@
  * WebflowUI Core
  * - Handles DOM ready, mutation observing, and component registration.
  * - All components use data-wf-api-name for opt-in.
+ * - Provides createRegistry() to eliminate per-module boilerplate.
  */
 (function () {
   window.WebflowUI = window.WebflowUI || {};
   if (window.WebflowUI._core) return; // prevent double-init
 
-  const NAME_ATTR = "data-wf-api-name";
-  const TYPE_ATTR = "data-wf-api";
+  var NAME_ATTR = "data-wf-api-name";
+  var TYPE_ATTR = "data-wf-api";
 
-  const components = [];
+  var components = [];
 
   function registerComponent(def) {
     // def: { type, isMatch(el), createInstance(el) }
@@ -19,7 +20,7 @@
   }
 
   function scan() {
-    const named = document.querySelectorAll("[" + NAME_ATTR + "]");
+    var named = document.querySelectorAll("[" + NAME_ATTR + "]");
     named.forEach(function (el) {
       components.forEach(function (comp) {
         try {
@@ -33,6 +34,18 @@
     });
   }
 
+  // Debounced scan for MutationObserver — coalesce rapid DOM changes
+  var _scanScheduled = false;
+
+  function _scheduleScan() {
+    if (_scanScheduled) return;
+    _scanScheduled = true;
+    requestAnimationFrame(function () {
+      _scanScheduled = false;
+      scan();
+    });
+  }
+
   function ready(fn) {
     if (document.readyState === "loading") {
       document.addEventListener("DOMContentLoaded", fn);
@@ -41,8 +54,8 @@
     }
   }
 
-  const docObserver = new MutationObserver(function (mutations) {
-    let shouldScan = false;
+  var docObserver = new MutationObserver(function (mutations) {
+    var shouldScan = false;
     for (var i = 0; i < mutations.length; i++) {
       var m = mutations[i];
       if (m.addedNodes && m.addedNodes.length) {
@@ -50,7 +63,7 @@
         break;
       }
     }
-    if (shouldScan) scan();
+    if (shouldScan) _scheduleScan();
   });
 
   ready(function () {
@@ -61,14 +74,73 @@
     });
   });
 
+  /**
+   * createRegistry(InstanceClass, isValid)
+   * Returns { getInstance, createInstance, all, destroy } for a module.
+   * Eliminates ~30 lines of per-module boilerplate.
+   */
+  function createRegistry(InstanceClass, isValid) {
+    var registry = new Map();
+
+    function getInstance(target) {
+      if (!target) return null;
+
+      if (target instanceof InstanceClass) return target;
+
+      if (target instanceof Element) {
+        return registry.get(target) || null;
+      }
+
+      if (typeof target === "string") {
+        var values = registry.values();
+        var next = values.next();
+        while (!next.done) {
+          var inst = next.value;
+          if (inst.name === target) return inst;
+          next = values.next();
+        }
+        return null;
+      }
+
+      return null;
+    }
+
+    function createInstance(root) {
+      if (registry.has(root)) return;
+      var instance = new InstanceClass(root);
+      if (isValid(instance)) {
+        registry.set(root, instance);
+      }
+    }
+
+    function all() {
+      return Array.from(registry.values());
+    }
+
+    function destroy(target) {
+      var inst = getInstance(target);
+      if (!inst) return false;
+      if (typeof inst.destroy === "function") inst.destroy();
+      registry.delete(inst.root);
+      return true;
+    }
+
+    return {
+      getInstance: getInstance,
+      createInstance: createInstance,
+      all: all,
+      destroy: destroy
+    };
+  }
+
   window.WebflowUI._core = {
     NAME_ATTR: NAME_ATTR,
     TYPE_ATTR: TYPE_ATTR,
     registerComponent: registerComponent,
-    scan: scan
+    scan: scan,
+    createRegistry: createRegistry
   };
 })();
-
 /**
  * WebflowUI.dropdown
  * - Works on Webflow native dropdowns (w-dropdown)
@@ -85,8 +157,6 @@
   var WF_TOGGLE_SELECTOR = ".w-dropdown-toggle";
   var WF_LIST_SELECTOR = ".w-dropdown-list";
   var OPEN_CLASS = "w--open";
-
-  var registry = new Map();
 
   function DropdownInstance(root) {
     this.root = root;
@@ -150,6 +220,14 @@
     return function () {
       self._listeners.delete(callback);
     };
+  };
+
+  DropdownInstance.prototype.destroy = function () {
+    if (this._mutationObserver) {
+      this._mutationObserver.disconnect();
+      this._mutationObserver = null;
+    }
+    this._listeners.clear();
   };
 
   DropdownInstance.prototype._watchStateChanges = function () {
@@ -252,69 +330,44 @@
     return false;
   }
 
-  function createInstance(root) {
-    if (!isDropdownRoot(root)) return;
-    if (registry.has(root)) return;
-    var instance = new DropdownInstance(root);
-    if (instance.toggleEl && instance.listEl) {
-      registry.set(root, instance);
-    }
-  }
+  var reg = core.createRegistry(DropdownInstance, function (inst) {
+    return !!inst.toggleEl && !!inst.listEl;
+  });
 
   core.registerComponent({
     type: TYPE_DROPDOWN,
     isMatch: isDropdownRoot,
-    createInstance: createInstance
+    createInstance: reg.createInstance
   });
-
-  function getInstance(target) {
-    if (!target) return null;
-
-    if (target instanceof DropdownInstance) return target;
-
-    if (target instanceof Element) {
-      return registry.get(target) || null;
-    }
-
-    if (typeof target === "string") {
-      var values = registry.values();
-      var next = values.next();
-      while (!next.done) {
-        var inst = next.value;
-        if (inst.name === target) return inst;
-        next = values.next();
-      }
-      return null;
-    }
-
-    return null;
-  }
 
   window.WebflowUI.dropdown = {
     all: function () {
-      return Array.from(registry.values());
+      return reg.all();
     },
     get: function (target) {
-      return getInstance(target);
+      return reg.getInstance(target);
+    },
+    destroy: function (target) {
+      return reg.destroy(target);
     },
     open: function (target, options) {
-      var inst = getInstance(target);
+      var inst = reg.getInstance(target);
       if (inst) inst.open(options);
     },
     close: function (target, options) {
-      var inst = getInstance(target);
+      var inst = reg.getInstance(target);
       if (inst) inst.close(options);
     },
     toggle: function (target, options) {
-      var inst = getInstance(target);
+      var inst = reg.getInstance(target);
       if (inst) inst.toggle(options);
     },
     isOpen: function (target) {
-      var inst = getInstance(target);
+      var inst = reg.getInstance(target);
       return inst ? inst.isOpen() : false;
     },
     onChange: function (target, callback) {
-      var inst = getInstance(target);
+      var inst = reg.getInstance(target);
       if (!inst) {
         console.warn("[WebflowUI.dropdown] No instance found for", target);
         return function () {};
@@ -326,7 +379,6 @@
     }
   };
 })();
-
 /**
  * WebflowUI.navbar
  * - Works on Webflow native navbars (w-nav)
@@ -344,8 +396,6 @@
   var WF_MENU_SELECTOR = ".w-nav-menu";
   var OPEN_CLASS = "w--open";
   var BODY_OPEN_CLASS = "w-nav-open";
-
-  var registry = new Map();
 
   function NavbarInstance(root) {
     this.root = root;
@@ -409,6 +459,14 @@
     return function () {
       self._listeners.delete(callback);
     };
+  };
+
+  NavbarInstance.prototype.destroy = function () {
+    if (this._mutationObserver) {
+      this._mutationObserver.disconnect();
+      this._mutationObserver = null;
+    }
+    this._listeners.clear();
   };
 
   NavbarInstance.prototype._watchStateChanges = function () {
@@ -488,69 +546,44 @@
     return false;
   }
 
-  function createInstance(root) {
-    if (!isNavbarRoot(root)) return;
-    if (registry.has(root)) return;
-    var instance = new NavbarInstance(root);
-    if (instance.buttonEl && instance.menuEl) {
-      registry.set(root, instance);
-    }
-  }
+  var reg = core.createRegistry(NavbarInstance, function (inst) {
+    return !!inst.buttonEl && !!inst.menuEl;
+  });
 
   core.registerComponent({
     type: TYPE_NAVBAR,
     isMatch: isNavbarRoot,
-    createInstance: createInstance
+    createInstance: reg.createInstance
   });
-
-  function getInstance(target) {
-    if (!target) return null;
-
-    if (target instanceof NavbarInstance) return target;
-
-    if (target instanceof Element) {
-      return registry.get(target) || null;
-    }
-
-    if (typeof target === "string") {
-      var values = registry.values();
-      var next = values.next();
-      while (!next.done) {
-        var inst = next.value;
-        if (inst.name === target) return inst;
-        next = values.next();
-      }
-      return null;
-    }
-
-    return null;
-  }
 
   window.WebflowUI.navbar = {
     all: function () {
-      return Array.from(registry.values());
+      return reg.all();
     },
     get: function (target) {
-      return getInstance(target);
+      return reg.getInstance(target);
+    },
+    destroy: function (target) {
+      return reg.destroy(target);
     },
     open: function (target, options) {
-      var inst = getInstance(target);
+      var inst = reg.getInstance(target);
       if (inst) inst.open(options);
     },
     close: function (target, options) {
-      var inst = getInstance(target);
+      var inst = reg.getInstance(target);
       if (inst) inst.close(options);
     },
     toggle: function (target, options) {
-      var inst = getInstance(target);
+      var inst = reg.getInstance(target);
       if (inst) inst.toggle(options);
     },
     isOpen: function (target) {
-      var inst = getInstance(target);
+      var inst = reg.getInstance(target);
       return inst ? inst.isOpen() : false;
     },
     onChange: function (target, callback) {
-      var inst = getInstance(target);
+      var inst = reg.getInstance(target);
       if (!inst) {
         console.warn("[WebflowUI.navbar] No instance found for", target);
         return function () {};
@@ -562,7 +595,6 @@
     }
   };
 })();
-
 /**
  * WebflowUI.radio
  * - Group-level API for radios
@@ -575,8 +607,6 @@
   var NAME_ATTR = core.NAME_ATTR;
   var TYPE_ATTR = core.TYPE_ATTR;
   var TYPE_RADIO = "radio-group";
-
-  var registry = new Map();
 
   function RadioGroupInstance(root) {
     this.root = root;
@@ -657,6 +687,14 @@
     };
   };
 
+  RadioGroupInstance.prototype.destroy = function () {
+    var self = this;
+    this.inputs.forEach(function (input) {
+      input.removeEventListener("change", self._boundOnChange);
+    });
+    this._listeners.clear();
+  };
+
   RadioGroupInstance.prototype._emitChange = function () {
     var value = this.getValue();
     this.root.classList.toggle("wf-api-has-value", value != null);
@@ -678,65 +716,40 @@
     return false;
   }
 
-  function createInstance(root) {
-    if (!isRadioRoot(root)) return;
-    if (registry.has(root)) return;
-    var instance = new RadioGroupInstance(root);
-    if (instance.inputs && instance.inputs.length) {
-      registry.set(root, instance);
-    }
-  }
+  var reg = core.createRegistry(RadioGroupInstance, function (inst) {
+    return !!inst.inputs && inst.inputs.length > 0;
+  });
 
   core.registerComponent({
     type: TYPE_RADIO,
     isMatch: isRadioRoot,
-    createInstance: createInstance
+    createInstance: reg.createInstance
   });
-
-  function getInstance(target) {
-    if (!target) return null;
-
-    if (target instanceof RadioGroupInstance) return target;
-
-    if (target instanceof Element) {
-      return registry.get(target) || null;
-    }
-
-    if (typeof target === "string") {
-      var values = registry.values();
-      var next = values.next();
-      while (!next.done) {
-        var inst = next.value;
-        if (inst.name === target) return inst;
-        next = values.next();
-      }
-      return null;
-    }
-
-    return null;
-  }
 
   window.WebflowUI.radio = {
     all: function () {
-      return Array.from(registry.values());
+      return reg.all();
     },
     get: function (target) {
-      return getInstance(target);
+      return reg.getInstance(target);
+    },
+    destroy: function (target) {
+      return reg.destroy(target);
     },
     getValue: function (target) {
-      var inst = getInstance(target);
+      var inst = reg.getInstance(target);
       return inst ? inst.getValue() : null;
     },
     setValue: function (target, value, options) {
-      var inst = getInstance(target);
+      var inst = reg.getInstance(target);
       if (inst) inst.setValue(value, options);
     },
     clear: function (target, options) {
-      var inst = getInstance(target);
+      var inst = reg.getInstance(target);
       if (inst) inst.clear(options);
     },
     onChange: function (target, callback) {
-      var inst = getInstance(target);
+      var inst = reg.getInstance(target);
       if (!inst) {
         console.warn("[WebflowUI.radio] No instance found for", target);
         return function () {};
@@ -748,7 +761,6 @@
     }
   };
 })();
-
 /**
  * WebflowUI.checkbox
  * - Group-level API for checkboxes
@@ -761,8 +773,6 @@
   var NAME_ATTR = core.NAME_ATTR;
   var TYPE_ATTR = core.TYPE_ATTR;
   var TYPE_CHECKBOX = "checkbox-group";
-
-  var registry = new Map();
 
   function CheckboxGroupInstance(root) {
     this.root = root;
@@ -847,6 +857,14 @@
     };
   };
 
+  CheckboxGroupInstance.prototype.destroy = function () {
+    var self = this;
+    this.inputs.forEach(function (input) {
+      input.removeEventListener("change", self._boundOnChange);
+    });
+    this._listeners.clear();
+  };
+
   CheckboxGroupInstance.prototype._emitChange = function () {
     var values = this.getValues();
     this.root.classList.toggle("wf-api-has-value", values.length > 0);
@@ -868,65 +886,40 @@
     return false;
   }
 
-  function createInstance(root) {
-    if (!isCheckboxRoot(root)) return;
-    if (registry.has(root)) return;
-    var instance = new CheckboxGroupInstance(root);
-    if (instance.inputs && instance.inputs.length) {
-      registry.set(root, instance);
-    }
-  }
+  var reg = core.createRegistry(CheckboxGroupInstance, function (inst) {
+    return !!inst.inputs && inst.inputs.length > 0;
+  });
 
   core.registerComponent({
     type: TYPE_CHECKBOX,
     isMatch: isCheckboxRoot,
-    createInstance: createInstance
+    createInstance: reg.createInstance
   });
-
-  function getInstance(target) {
-    if (!target) return null;
-
-    if (target instanceof CheckboxGroupInstance) return target;
-
-    if (target instanceof Element) {
-      return registry.get(target) || null;
-    }
-
-    if (typeof target === "string") {
-      var values = registry.values();
-      var next = values.next();
-      while (!next.done) {
-        var inst = next.value;
-        if (inst.name === target) return inst;
-        next = values.next();
-      }
-      return null;
-    }
-
-    return null;
-  }
 
   window.WebflowUI.checkbox = {
     all: function () {
-      return Array.from(registry.values());
+      return reg.all();
     },
     get: function (target) {
-      return getInstance(target);
+      return reg.getInstance(target);
+    },
+    destroy: function (target) {
+      return reg.destroy(target);
     },
     getValues: function (target) {
-      var inst = getInstance(target);
+      var inst = reg.getInstance(target);
       return inst ? inst.getValues() : [];
     },
     setValues: function (target, values, options) {
-      var inst = getInstance(target);
+      var inst = reg.getInstance(target);
       if (inst) inst.setValues(values, options);
     },
     clear: function (target, options) {
-      var inst = getInstance(target);
+      var inst = reg.getInstance(target);
       if (inst) inst.clear(options);
     },
     onChange: function (target, callback) {
-      var inst = getInstance(target);
+      var inst = reg.getInstance(target);
       if (!inst) {
         console.warn("[WebflowUI.checkbox] No instance found for", target);
         return function () {};
@@ -938,14 +931,12 @@
     }
   };
 })();
-
 /**
  * WebflowUI.form
  * - Works on Webflow native forms (w-form)
  * - Root element: .w-form with data-wf-api-name
  * - Detects Webflow form success / failure via DOM observation
  * - Provides a flexible API: values, events, validators
- * - No built-in domain blocking or autocorrect – those are plugins on top.
  */
 (function () {
   if (window.WebflowUI.form) return;
@@ -959,7 +950,6 @@
   var ERROR_SELECTOR = ".w-form-fail";
   var ERROR_SLOT_ATTR = "data-wf-error-slot";
 
-  var registry = new Map();
   var globalValidators = new Set();
 
   function FormInstance(root) {
@@ -997,6 +987,10 @@
       self._fieldsByName[name].push(field);
     });
 
+    this._handleSubmit = null;
+    this._successObserver = null;
+    this._failObserver = null;
+
     if (!this.formEl) {
       console.warn("[WebflowUI.form] No <form> inside .w-form for", root);
       return;
@@ -1010,12 +1004,6 @@
 
     this._handleSubmit = function (event) {
       self._onSubmit(event);
-    };
-    this._handleSuccess = function (event) {
-      self._onSuccess(event);
-    };
-    this._handleFail = function (event) {
-      self._onFail(event);
     };
 
     // Use capture phase to intercept before Webflow's native handler
@@ -1047,6 +1035,24 @@
         attributeFilter: ["style"]
       });
     }
+  };
+
+  FormInstance.prototype.destroy = function () {
+    if (this.formEl && this._handleSubmit) {
+      this.formEl.removeEventListener("submit", this._handleSubmit, true);
+    }
+    if (this._successObserver) {
+      this._successObserver.disconnect();
+      this._successObserver = null;
+    }
+    if (this._failObserver) {
+      this._failObserver.disconnect();
+      this._failObserver = null;
+    }
+    this._submitListeners.clear();
+    this._successListeners.clear();
+    this._errorListeners.clear();
+    this._validators.clear();
   };
 
   // --- Values API ---
@@ -1247,8 +1253,11 @@
 
     if (this.errorEl) {
       if (this.errorSlotEl) {
-        this.errorSlotEl.innerHTML =
-          message != null ? String(message) : this._defaultErrorHTML || "";
+        if (message != null) {
+          this.errorSlotEl.textContent = String(message);
+        } else {
+          this.errorSlotEl.innerHTML = this._defaultErrorHTML || "";
+        }
       }
       this.errorEl.style.display = "block";
     }
@@ -1257,7 +1266,7 @@
   FormInstance.prototype.showError = function (message) {
     if (this.errorEl) {
       if (this.errorSlotEl && message) {
-        this.errorSlotEl.innerHTML = String(message);
+        this.errorSlotEl.textContent = String(message);
       }
       this.errorEl.style.display = "block";
     }
@@ -1365,65 +1374,40 @@
     return false;
   }
 
-  function createInstance(root) {
-    if (!isFormRoot(root)) return;
-    if (registry.has(root)) return;
-    var instance = new FormInstance(root);
-    if (instance.formEl) {
-      registry.set(root, instance);
-    }
-  }
+  var reg = core.createRegistry(FormInstance, function (inst) {
+    return !!inst.formEl;
+  });
 
   core.registerComponent({
     type: TYPE_FORM,
     isMatch: isFormRoot,
-    createInstance: createInstance
+    createInstance: reg.createInstance
   });
-
-  function getInstance(target) {
-    if (!target) return null;
-
-    if (target instanceof FormInstance) return target;
-
-    if (target instanceof Element) {
-      return registry.get(target) || null;
-    }
-
-    if (typeof target === "string") {
-      var values = registry.values();
-      var next = values.next();
-      while (!next.done) {
-        var inst = next.value;
-        if (inst.name === target) return inst;
-        next = values.next();
-      }
-      return null;
-    }
-
-    return null;
-  }
 
   window.WebflowUI.form = {
     all: function () {
-      return Array.from(registry.values());
+      return reg.all();
     },
     get: function (target) {
-      return getInstance(target);
+      return reg.getInstance(target);
+    },
+    destroy: function (target) {
+      return reg.destroy(target);
     },
     getValues: function (target) {
-      var inst = getInstance(target);
+      var inst = reg.getInstance(target);
       return inst ? inst.getValues() : {};
     },
     setValues: function (target, values) {
-      var inst = getInstance(target);
+      var inst = reg.getInstance(target);
       if (inst) inst.setValues(values);
     },
     submit: function (target, options) {
-      var inst = getInstance(target);
+      var inst = reg.getInstance(target);
       if (inst) inst.submit(options);
     },
     onSubmit: function (target, callback) {
-      var inst = getInstance(target);
+      var inst = reg.getInstance(target);
       if (!inst) {
         console.warn("[WebflowUI.form] No instance found for", target);
         return function () {};
@@ -1431,7 +1415,7 @@
       return inst.onSubmit(callback);
     },
     onSuccess: function (target, callback) {
-      var inst = getInstance(target);
+      var inst = reg.getInstance(target);
       if (!inst) {
         console.warn("[WebflowUI.form] No instance found for", target);
         return function () {};
@@ -1439,7 +1423,7 @@
       return inst.onSuccess(callback);
     },
     onError: function (target, callback) {
-      var inst = getInstance(target);
+      var inst = reg.getInstance(target);
       if (!inst) {
         console.warn("[WebflowUI.form] No instance found for", target);
         return function () {};
@@ -1447,7 +1431,7 @@
       return inst.onError(callback);
     },
     addValidator: function (target, fn) {
-      var inst = getInstance(target);
+      var inst = reg.getInstance(target);
       if (!inst) {
         console.warn("[WebflowUI.form] No instance found for", target);
         return function () {};
@@ -1462,23 +1446,23 @@
       };
     },
     getField: function (target, name) {
-      var inst = getInstance(target);
+      var inst = reg.getInstance(target);
       return inst ? inst.getField(name) : null;
     },
     getFields: function (target, name) {
-      var inst = getInstance(target);
+      var inst = reg.getInstance(target);
       return inst ? inst.getFields(name) : [];
     },
     showError: function (target, message) {
-      var inst = getInstance(target);
+      var inst = reg.getInstance(target);
       if (inst) inst.showError(message);
     },
     hideError: function (target) {
-      var inst = getInstance(target);
+      var inst = reg.getInstance(target);
       if (inst) inst.hideError();
     },
     reset: function (target) {
-      var inst = getInstance(target);
+      var inst = reg.getInstance(target);
       if (inst) inst.reset();
     },
     refresh: function () {
@@ -1486,7 +1470,6 @@
     }
   };
 })();
-
 /**
  * WebflowUI.gate
  * - Generic content gating with localStorage persistence
@@ -1515,7 +1498,6 @@
   var UNLOCKED_CLASS = "wf-gate-unlocked";
   var LOCKED_CLASS = "wf-gate-locked";
 
-  var registry = new Map();
   var validators = {};
 
   function GateInstance(root) {
@@ -1565,29 +1547,28 @@
     if (!this.formWrapperEl.hasAttribute(NAME_ATTR)) {
       var formName = (this.name || "gate") + "-form";
       this.formWrapperEl.setAttribute(NAME_ATTR, formName);
-      core.scan();
     }
 
-    var attempts = 0;
-    var maxAttempts = 20;
+    // Synchronous scan ensures the form instance is created immediately
+    core.scan();
 
-    function tryHook() {
+    var formInst = window.WebflowUI.form.get(this.formWrapperEl);
+    if (formInst) {
+      this._formInstance = formInst;
+      this._attachValidator();
+      this._attachUnlockOnSuccess();
+      return;
+    }
+
+    // Single rAF fallback in case scan ran before form module registered
+    requestAnimationFrame(function () {
       var formInst = window.WebflowUI.form.get(self.formWrapperEl);
-
       if (formInst) {
         self._formInstance = formInst;
         self._attachValidator();
         self._attachUnlockOnSuccess();
-        return;
       }
-
-      attempts++;
-      if (attempts < maxAttempts) {
-        setTimeout(tryHook, 50);
-      }
-    }
-
-    tryHook();
+    });
   };
 
   GateInstance.prototype._attachUnlockOnSuccess = function () {
@@ -1597,7 +1578,6 @@
     if (this._unsubscribeSuccess) return;
 
     this._unsubscribeSuccess = this._formInstance.onSuccess(function () {
-      // Only grant access when Webflow actually reports success
       self._grantAccess();
     });
   };
@@ -1639,7 +1619,7 @@
       }
 
       // Valid input:
-      // - If unlockOn="submit" (default): unlock immediately and block Webflow submission
+      // - If unlockOn="submit": unlock immediately and block Webflow submission
       // - If unlockOn="success": allow Webflow submission, unlock only on w-form-success
       if (self.unlockOn === "submit") {
         ctx.event.preventDefault();
@@ -1720,6 +1700,18 @@
     };
   };
 
+  GateInstance.prototype.destroy = function () {
+    if (this._unsubscribeValidator) {
+      this._unsubscribeValidator();
+      this._unsubscribeValidator = null;
+    }
+    if (this._unsubscribeSuccess) {
+      this._unsubscribeSuccess();
+      this._unsubscribeSuccess = null;
+    }
+    this._listeners.clear();
+  };
+
   GateInstance.prototype._emitChange = function (unlocked) {
     var self = this;
     this._listeners.forEach(function (cb) {
@@ -1738,63 +1730,40 @@
     return false;
   }
 
-  function createInstance(root) {
-    if (!isGateRoot(root)) return;
-    if (registry.has(root)) return;
-    var instance = new GateInstance(root);
-    if (instance.overlayEl) {
-      registry.set(root, instance);
-    }
-  }
+  var reg = core.createRegistry(GateInstance, function (inst) {
+    return !!inst.overlayEl;
+  });
 
   core.registerComponent({
     type: TYPE_GATE,
     isMatch: isGateRoot,
-    createInstance: createInstance
+    createInstance: reg.createInstance
   });
-
-  function getInstance(target) {
-    if (!target) return null;
-    if (target instanceof GateInstance) return target;
-
-    if (target instanceof Element) {
-      return registry.get(target) || null;
-    }
-
-    if (typeof target === "string") {
-      var iter = registry.values();
-      var next = iter.next();
-      while (!next.done) {
-        if (next.value.name === target) return next.value;
-        next = iter.next();
-      }
-      return null;
-    }
-
-    return null;
-  }
 
   window.WebflowUI.gate = {
     all: function () {
-      return Array.from(registry.values());
+      return reg.all();
     },
     get: function (target) {
-      return getInstance(target);
+      return reg.getInstance(target);
+    },
+    destroy: function (target) {
+      return reg.destroy(target);
     },
     isUnlocked: function (target) {
-      var inst = getInstance(target);
+      var inst = reg.getInstance(target);
       return inst ? inst.isUnlocked() : false;
     },
     unlock: function (target) {
-      var inst = getInstance(target);
+      var inst = reg.getInstance(target);
       if (inst) inst.unlock();
     },
     lock: function (target) {
-      var inst = getInstance(target);
+      var inst = reg.getInstance(target);
       if (inst) inst.lock();
     },
     onChange: function (target, callback) {
-      var inst = getInstance(target);
+      var inst = reg.getInstance(target);
       if (!inst) {
         console.warn("[WebflowUI.gate] No instance found for", target);
         return function () {};
