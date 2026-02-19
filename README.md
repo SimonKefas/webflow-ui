@@ -15,7 +15,7 @@ Add the following script to your Webflow project's **Custom Code** section (Site
 For production sites, pin to a specific version to avoid unexpected changes:
 
 ```html
-<script src="https://cdn.jsdelivr.net/gh/SimonKefas/webflow-ui@1.2.3/script.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/SimonKefas/webflow-ui@1.3.0/script.js"></script>
 ```
 
 ---
@@ -94,6 +94,10 @@ WebflowUI.{component}.get(domElement);
 
 // Force re-scan for dynamically added elements
 WebflowUI.{component}.refresh();
+
+// Destroy an instance (removes listeners, disconnects observers)
+WebflowUI.{component}.destroy("name");
+WebflowUI.{component}.destroy(domElement);
 ```
 
 ---
@@ -131,6 +135,9 @@ const allDropdowns = WebflowUI.dropdown.all();
 
 // Get specific instance
 const instance = WebflowUI.dropdown.get("menuName");
+
+// Destroy instance (disconnects observer, removes listeners)
+WebflowUI.dropdown.destroy("menuName");
 ```
 
 ### Instance Properties
