@@ -15,7 +15,7 @@ Add the following script to your Webflow project's **Custom Code** section (Site
 For production sites, pin to a specific version to avoid unexpected changes:
 
 ```html
-<script src="https://cdn.jsdelivr.net/gh/SimonKefas/webflow-ui@1.3.0/script.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/SimonKefas/webflow-ui@1.4.0/script.js"></script>
 ```
 
 ---
