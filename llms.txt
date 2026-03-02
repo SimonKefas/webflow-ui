@@ -1,0 +1,538 @@
+# webflow-ui
+
+JavaScript API for controlling Webflow-native components (dropdowns, navbars, forms, radios, checkboxes, content gates).
+
+## Install
+
+```html
+<script src="https://cdn.jsdelivr.net/gh/SimonKefas/webflow-ui@1.4.0/script.js"></script>
+```
+
+## Core Concepts
+
+### Opt-in via attribute
+
+Every managed element requires `data-wf-api-name="someName"` on its Webflow component root.
+The name is used to look up instances: `WebflowUI.dropdown.get("someName")`.
+
+### Explicit type override
+
+Add `data-wf-api="type"` to force a component type when auto-detection would fail.
+Accepted values: `dropdown`, `navbar`, `radio`, `radio-group`, `checkbox`, `checkbox-group`, `form`, `gate`.
+
+### Target resolution
+
+All methods accepting `target` resolve in order:
+1. `string` — matched against `data-wf-api-name`
+2. `Element` — matched against registered root elements
+3. Instance object — returned as-is
+
+### Listener pattern
+
+Every `onChange`, `onSubmit`, `onSuccess`, `onError`, and `addValidator` call returns an unsubscribe function:
+
+```js
+const off = WebflowUI.form.onSubmit("myForm", (ctx) => { /* ... */ });
+off(); // removes listener
+```
+
+---
+
+## Dropdown
+
+### HTML
+
+```html
+<div data-wf-api-name="myDropdown" class="w-dropdown">
+  <div class="w-dropdown-toggle">Toggle</div>
+  <nav class="w-dropdown-list">Content</nav>
+</div>
+```
+
+### API — `WebflowUI.dropdown`
+
+```
+get(target) → DropdownInstance | null
+all() → DropdownInstance[]
+destroy(target) → boolean
+open(target, { useNative?: boolean }) → void
+close(target, { useNative?: boolean }) → void
+toggle(target, { useNative?: boolean }) → void
+isOpen(target) → boolean
+onChange(target, (isOpen: boolean, instance) => void) → unsubscribe
+refresh() → void
+```
+
+`useNative` defaults to `true` (simulates click). Set `false` for direct class manipulation.
+
+### Instance properties
+
+```
+root        Element   .w-dropdown root
+name        string    data-wf-api-name value
+toggleEl    Element   .w-dropdown-toggle
+listEl      Element   .w-dropdown-list
+```
+
+### CSS classes applied
+
+- `wf-api-open` on `root` when open
+
+---
+
+## Navbar
+
+### HTML
+
+```html
+<nav data-wf-api-name="myNav" class="w-nav">
+  <div class="w-nav-button">☰</div>
+  <nav class="w-nav-menu">Links</nav>
+</nav>
+```
+
+### API — `WebflowUI.navbar`
+
+```
+get(target) → NavbarInstance | null
+all() → NavbarInstance[]
+destroy(target) → boolean
+open(target, { useNative?: boolean }) → void
+close(target, { useNative?: boolean }) → void
+toggle(target, { useNative?: boolean }) → void
+isOpen(target) → boolean
+onChange(target, (isOpen: boolean, instance) => void) → unsubscribe
+refresh() → void
+```
+
+### Instance properties
+
+```
+root        Element   .w-nav root
+name        string    data-wf-api-name value
+buttonEl    Element   .w-nav-button
+menuEl      Element   .w-nav-menu
+```
+
+### CSS classes applied
+
+- `wf-api-open` on `root` when open
+
+---
+
+## Radio Group
+
+### HTML
+
+```html
+<div data-wf-api-name="myRadios">
+  <label class="w-radio">
+    <input type="radio" name="choice" value="a" />
+    <span>Option A</span>
+  </label>
+  <label class="w-radio">
+    <input type="radio" name="choice" value="b" />
+    <span>Option B</span>
+  </label>
+</div>
+```
+
+### API — `WebflowUI.radio`
+
+```
+get(target) → RadioGroupInstance | null
+all() → RadioGroupInstance[]
+destroy(target) → boolean
+getValue(target) → string | null
+setValue(target, value, { useNative?: boolean }) → void
+clear(target, { useNative?: boolean }) → void
+onChange(target, (value: string | null, instance) => void) → unsubscribe
+refresh() → void
+```
+
+### Instance properties
+
+```
+root        Element              container element
+name        string               data-wf-api-name value
+inputs      HTMLInputElement[]   all radio inputs within root
+```
+
+### CSS classes applied
+
+- `wf-api-has-value` on `root` when a radio is selected
+
+---
+
+## Checkbox Group
+
+### HTML
+
+```html
+<div data-wf-api-name="myChecks">
+  <label class="w-checkbox">
+    <input type="checkbox" name="opts" value="x" />
+    <span>X</span>
+  </label>
+  <label class="w-checkbox">
+    <input type="checkbox" name="opts" value="y" />
+    <span>Y</span>
+  </label>
+</div>
+```
+
+### API — `WebflowUI.checkbox`
+
+```
+get(target) → CheckboxGroupInstance | null
+all() → CheckboxGroupInstance[]
+destroy(target) → boolean
+getValues(target) → string[]
+setValues(target, values: string[], { useNative?: boolean }) → void
+clear(target, { useNative?: boolean }) → void
+onChange(target, (values: string[], instance) => void) → unsubscribe
+refresh() → void
+```
+
+### Instance properties
+
+```
+root        Element              container element
+name        string               data-wf-api-name value
+inputs      HTMLInputElement[]   all checkbox inputs within root
+```
+
+### CSS classes applied
+
+- `wf-api-has-value` on `root` when at least one checkbox is checked
+
+---
+
+## Form
+
+### HTML
+
+```html
+<div data-wf-api-name="myForm" class="w-form">
+  <form>
+    <input type="text" name="email" />
+    <input type="submit" value="Send" />
+  </form>
+  <div class="w-form-done">Thanks!</div>
+  <div class="w-form-fail">Something went wrong.</div>
+</div>
+```
+
+Custom action mode (blocks Webflow native submission entirely):
+
+```html
+<div data-wf-api-name="myForm" data-wf-api-action="custom" class="w-form">
+  ...
+</div>
+```
+
+Custom error slot:
+
+```html
+<div class="w-form-fail">
+  <span data-wf-error-slot>Error message appears here</span>
+</div>
+```
+
+### API — `WebflowUI.form`
+
+```
+get(target) → FormInstance | null
+all() → FormInstance[]
+destroy(target) → boolean
+getValues(target) → { [name]: string | string[] }
+setValues(target, values: object) → void
+submit(target, { bypassValidation?: boolean }) → void
+getField(target, name: string) → HTMLElement | null
+getFields(target, name: string) → HTMLElement[]
+onSubmit(target, (ctx: SubmitContext) => void) → unsubscribe
+onSuccess(target, (ctx: SuccessContext) => void) → unsubscribe
+onError(target, (ctx: ErrorContext) => void) → unsubscribe
+addValidator(target, (ctx: ValidatorContext) => ValidatorResult) → unsubscribe
+registerValidator((ctx: ValidatorContext) => ValidatorResult) → unsubscribe
+showSuccess(target, message?: string) → void
+showError(target, message?: string) → void
+hideError(target) → void
+reset(target) → void
+refresh() → void
+```
+
+### Instance properties
+
+```
+root          Element           .w-form root
+name          string            data-wf-api-name value
+action        string | null     data-wf-api-action value ("custom" or null)
+formEl        HTMLFormElement   the <form> element
+successEl     Element | null    .w-form-done
+errorEl       Element | null    .w-form-fail
+errorSlotEl   Element | null    error text target (see error slot resolution)
+inputs        HTMLElement[]     all input, textarea, select elements
+```
+
+### Callback context shapes
+
+SubmitContext, SuccessContext, ErrorContext all share the same shape:
+
+```js
+{
+  event,       // Event — native submit Event (SubmitContext) or synthetic CustomEvent (Success/Error)
+  form,        // HTMLFormElement
+  instance,    // FormInstance
+  values       // { [fieldName]: string | string[] }
+}
+```
+
+ValidatorContext has the same shape as SubmitContext.
+
+### getValues() return types by input type
+
+```
+text, email, tel, password, hidden, url, number, textarea → string
+select (single)  → string
+select (multiple) → string[]
+radio            → string (checked value only; absent if none checked)
+checkbox         → string[] (checked values; absent if none checked)
+```
+
+### Validator return values
+
+```
+true                              → valid, continue
+undefined                         → valid, continue
+"error message"                   → invalid, show message
+{ message: string, field: Element } → invalid, show message + highlight field
+{ message: string }               → invalid, show message only
+{ field: Element }                → invalid, highlight field + default error
+false / null / 0 / ""             → invalid, show default error
+```
+
+When invalid: `preventDefault()`, `stopPropagation()`, and `stopImmediatePropagation()` are called on the submit event. Per-form validators run first, then global validators. Stops at first failure.
+
+### CSS classes applied
+
+- `wf-api-invalid` on individual field elements that fail validation
+
+### Error slot resolution order
+
+1. `[data-wf-error-slot]` inside `.w-form-fail`
+2. First child element of `.w-form-fail`
+3. `.w-form-fail` element itself
+
+---
+
+## Gate (Content Gating)
+
+### HTML
+
+```html
+<div data-wf-api-name="myGate" data-wf-gate>
+  <div data-wf-gate-overlay>
+    <div data-wf-gate-form class="w-form">
+      <form>
+        <input type="text" name="code" />
+        <input type="submit" value="Unlock" />
+      </form>
+      <div class="w-form-done">Access granted</div>
+      <div class="w-form-fail">Wrong code</div>
+    </div>
+  </div>
+  <div>Protected content here</div>
+</div>
+```
+
+### Gate-specific attributes
+
+All attributes except `data-wf-gate-overlay` and `data-wf-gate-form` go on the gate root element.
+
+```
+data-wf-gate                            on root — marks element as a gate
+data-wf-gate-key="customKey"            on root — custom localStorage key (default: "wf-gate-access-{name}")
+data-wf-gate-input="fieldName"          on root — input field name passed to validator
+data-wf-gate-validator="validatorName"  on root — registered validator to use
+data-wf-gate-unlock-on="submit|success" on root — when to unlock (default: "success")
+data-wf-gate-overlay                    on child — the overlay element (hidden when unlocked)
+data-wf-gate-form                       on child — form wrapper inside the gate
+```
+
+### API — `WebflowUI.gate`
+
+```
+get(target) → GateInstance | null
+all() → GateInstance[]
+destroy(target) → boolean
+isUnlocked(target) → boolean
+unlock(target) → void
+lock(target) → void
+onChange(target, (isUnlocked: boolean, instance) => void) → unsubscribe
+registerValidator(name: string, (value, allValues, instance) => true | string) → void
+getValidator(name: string) → function | null
+clearAccess(key: string) → void
+refresh() → void
+```
+
+### Instance properties
+
+```
+root             Element        gate root
+name             string         data-wf-api-name value
+storageKey       string         localStorage key
+overlayEl        Element        the overlay element
+formWrapperEl    Element | null form wrapper inside gate
+inputName        string | null  data-wf-gate-input value
+validatorName    string | null  data-wf-gate-validator value
+unlockOn         string         "success" (default) or "submit"
+```
+
+### Gate validator signature
+
+```js
+function(value, allValues, gateInstance) → true | string
+// value: string | null — value of the input named by data-wf-gate-input
+// allValues: object — all form field values
+// gateInstance: GateInstance
+// Return true to grant access, or a string error message to deny
+```
+
+### Unlock behavior
+
+- `unlockOn="success"` (default): Webflow submits the form normally. Gate unlocks when `.w-form-done` becomes visible.
+- `unlockOn="submit"`: `preventDefault()` blocks native submission. Gate unlocks immediately after validation passes.
+
+### CSS classes applied
+
+- `wf-gate-locked` on `root` when locked
+- `wf-gate-unlocked` on `root` when unlocked
+
+### localStorage
+
+Stores `"true"` at key `wf-gate-access-{name}` (or custom key). On page load, auto-unlocks if access exists.
+
+---
+
+## Recipes
+
+### Password-gated content
+
+```html
+<div data-wf-api-name="premium" data-wf-gate data-wf-gate-input="password" data-wf-gate-validator="checkPassword">
+  <div data-wf-gate-overlay>
+    <div data-wf-gate-form>
+      <div class="w-form">
+        <form>
+          <input type="password" name="password" placeholder="Enter password" />
+          <input type="submit" value="Unlock" />
+        </form>
+        <div class="w-form-done">Access granted</div>
+        <div class="w-form-fail"><span data-wf-error-slot></span></div>
+      </div>
+    </div>
+  </div>
+  <div>Protected content</div>
+</div>
+```
+
+```js
+WebflowUI.gate.registerValidator("checkPassword", (value) => {
+  return value === "secret123" ? true : "Wrong password";
+});
+```
+
+### Custom action form (no Webflow submission)
+
+```html
+<div data-wf-api-name="contactForm" data-wf-api-action="custom" class="w-form">
+  <form>
+    <input type="text" name="name" required />
+    <input type="email" name="email" required />
+    <textarea name="message"></textarea>
+    <input type="submit" value="Send" />
+  </form>
+  <div class="w-form-done">Sent!</div>
+  <div class="w-form-fail">Error</div>
+</div>
+```
+
+```js
+WebflowUI.form.onSubmit("contactForm", async (ctx) => {
+  try {
+    await fetch("/api/contact", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(ctx.values),
+    });
+    WebflowUI.form.showSuccess("contactForm");
+  } catch {
+    WebflowUI.form.showError("contactForm", "Failed to send message.");
+  }
+});
+```
+
+### Form validation with field highlighting
+
+```html
+<div data-wf-api-name="signup" class="w-form">
+  <form>
+    <input type="email" name="email" />
+    <input type="password" name="password" />
+    <input type="submit" value="Sign Up" />
+  </form>
+  <div class="w-form-done">Welcome!</div>
+  <div class="w-form-fail"><span data-wf-error-slot></span></div>
+</div>
+```
+
+```js
+WebflowUI.form.addValidator("signup", (ctx) => {
+  if (ctx.values.password.length < 8) {
+    return {
+      message: "Password must be at least 8 characters",
+      field: ctx.instance.getField("password"),
+    };
+  }
+  return true;
+});
+```
+
+### React to dropdown state
+
+```js
+WebflowUI.dropdown.onChange("filters", (isOpen) => {
+  console.log(isOpen ? "Opened" : "Closed");
+});
+```
+
+### Conditional form submission blocking
+
+```js
+let allowSubmit = false;
+
+WebflowUI.form.addValidator("checkout", (ctx) => {
+  if (!allowSubmit) return "Please confirm your order first.";
+  return true;
+});
+
+document.querySelector("#confirmBtn").addEventListener("click", () => {
+  allowSubmit = true;
+  WebflowUI.form.submit("checkout");
+});
+```
+
+### Programmatic radio/checkbox control
+
+```js
+WebflowUI.radio.setValue("plan", "premium");
+console.log(WebflowUI.radio.getValue("plan")); // "premium"
+
+WebflowUI.checkbox.setValues("features", ["dark-mode", "notifications"]);
+console.log(WebflowUI.checkbox.getValues("features")); // ["dark-mode", "notifications"]
+
+WebflowUI.radio.onChange("plan", (value) => {
+  console.log("Selected plan:", value);
+});
+```
