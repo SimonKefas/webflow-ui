@@ -425,6 +425,54 @@ For explicit control, use `data-wf-error-slot`:
 
 When a validator returns a message, it replaces the slot content. When the error clears, the original text is restored.
 
+### Custom Action Forms
+
+Use `data-wf-api-action="custom"` to fully bypass Webflow's native form submission. This is ideal for forms that call your own API endpoints, perform client-side actions, or redirect the user.
+
+```html
+<div class="w-form" data-wf-api-name="searchForm" data-wf-api-action="custom">
+  <form>
+    <input type="text" name="query" placeholder="Search...">
+    <button type="submit">Go</button>
+  </form>
+  <div class="w-form-done">Success!</div>
+  <div class="w-form-fail"><span data-wf-error-slot>Error</span></div>
+</div>
+```
+
+```javascript
+WebflowUI.form.onSubmit("searchForm", function(ctx) {
+  fetch("/api/search", { method: "POST", body: JSON.stringify(ctx.values) })
+    .then(function(res) { return res.json(); })
+    .then(function(data) { ctx.instance.showSuccess("Done!"); })
+    .catch(function(err) { ctx.instance.showError("Something went wrong"); });
+});
+```
+
+**`showSuccess(message)`** — hides the form and error block, shows the `.w-form-done` block. If a `message` is provided, it replaces the success block content.
+
+```javascript
+// Via public API
+WebflowUI.form.showSuccess("searchForm", "Results loaded!");
+
+// Via instance
+ctx.instance.showSuccess("Results loaded!");
+```
+
+### Blocking Webflow Submission from Listeners
+
+Even without `data-wf-api-action`, `onSubmit` listeners can call `ctx.event.preventDefault()` to block Webflow's native submission on a per-submit basis:
+
+```javascript
+WebflowUI.form.onSubmit("contactForm", function(ctx) {
+  if (someCondition) {
+    ctx.event.preventDefault(); // Blocks Webflow for this submission
+    doCustomAction(ctx.values);
+  }
+  // Otherwise, Webflow handles the submission normally
+});
+```
+
 ### CSS Classes
 
 - `wf-api-invalid` — Added to fields that fail validation

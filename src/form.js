@@ -22,6 +22,7 @@
   function FormInstance(root) {
     this.root = root;
     this.name = root.getAttribute(NAME_ATTR) || null;
+    this.action = root.getAttribute("data-wf-api-action") || null;
     this.formEl = root.querySelector("form");
     this.successEl = root.querySelector(SUCCESS_SELECTOR);
     this.errorEl = root.querySelector(ERROR_SELECTOR);
@@ -342,6 +343,21 @@
     }
   };
 
+  FormInstance.prototype.showSuccess = function (message) {
+    if (this.formEl) {
+      this.formEl.style.display = "none";
+    }
+    if (this.errorEl) {
+      this.errorEl.style.display = "none";
+    }
+    if (this.successEl) {
+      if (message != null) {
+        this.successEl.textContent = String(message);
+      }
+      this.successEl.style.display = "block";
+    }
+  };
+
   FormInstance.prototype.hideError = function () {
     if (this.errorEl) {
       this.errorEl.style.display = "none";
@@ -365,6 +381,11 @@
   // --- Internal event handlers ---
 
   FormInstance.prototype._onSubmit = function (event) {
+    // Custom action forms always block Webflow's native submission
+    if (this.action === "custom") {
+      event.preventDefault();
+    }
+
     var ctx = {
       event: event,
       form: this.formEl,
@@ -381,16 +402,6 @@
       return;
     }
 
-    // If a validator/plugin intentionally prevented default (e.g. gate unlock),
-    // treat the submission as "handled" and stop Webflow's native handler too.
-    if (event.defaultPrevented) {
-      // Ensure default is prevented (idempotent) and block any other handlers
-      event.preventDefault();
-      event.stopPropagation();
-      event.stopImmediatePropagation();
-      return;
-    }
-
     this._submitListeners.forEach(function (cb) {
       try {
         cb(ctx);
@@ -398,6 +409,13 @@
         console.error("[WebflowUI.form] onSubmit callback error", err);
       }
     });
+
+    // If anything prevented default (custom action, validator, or onSubmit
+    // listener), block Webflow's native handler from firing.
+    if (event.defaultPrevented) {
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+    }
   };
 
   FormInstance.prototype._onSuccess = function (event) {
@@ -519,6 +537,10 @@
     getFields: function (target, name) {
       var inst = reg.getInstance(target);
       return inst ? inst.getFields(name) : [];
+    },
+    showSuccess: function (target, message) {
+      var inst = reg.getInstance(target);
+      if (inst) inst.showSuccess(message);
     },
     showError: function (target, message) {
       var inst = reg.getInstance(target);
